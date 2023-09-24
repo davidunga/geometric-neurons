@@ -1,0 +1,10 @@
+data:
+  name: TP_RJ
+  bin_sz: .01
+  lag: .1
+  seg_dur: .2
+  seg_radcurv_bounds: [.2, 5]
+  proc_kind: affine
+sameness:
+  same_pcntl: .1
+  notSame_pcntl
