@@ -1,21 +1,83 @@
 """
 Motor and kinematic data processing + containers
 """
+import numpy as np
+import pandas as pd
+from motorneural.npdataframe import NpDataFrame
+from motorneural.typetools import *
 
-from src.motorneural.typetools import *
-from src.motorneural.uniformly_sampled import UniformlySampled
 import geometrik as gk
 
 # ----------------------------------
 
 
-class KinData(UniformlySampled):
-    """ uniformly sampled kinematic data """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+def calc_stat(stat: str, x, units: str = 'none', **kwargs):
+    assert units in ('none', 'deg', 'rad')
+    stat = {'med': 'median', 'avg': 'mean'}.get(stat.lower(), stat.lower())
+    stat_fcn = getattr(np, stat)
+    if units in ('deg', 'rag') and stat not in ('min', 'max'):
+        if units == 'deg':
+            x = np.radians(x)
+        ret = np.arctan2(stat_fcn(np.sin(x), **kwargs), stat_fcn(np.cos(x), **kwargs)) % (2 * np.pi)
+        if units == 'deg':
+            ret = np.degrees(ret)
+    else:
+        ret = stat_fcn(x, **kwargs)
+    return ret
 
+
+class KinData(NpDataFrame):
+
+    @classmethod
+    def from_dict(cls, kin: dict[str, Sequence[float]], t: Sequence[float]):
+        df = pd.DataFrame.from_dict(kin)
+        return cls(df, t=t, aliases={'X': ['PosX', 'PosY']})
+
+    @property
+    def num_vars(self):
+        return self.shape[1]
+
+
+#
+# class KinData2(UniformlySampled):
+#     """ uniformly sampled kinematic data """
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self._stat_fcns = {'Med': np.median, 'Avg': np.mean, 'Std': np.std}
+#         self._cache = {}
+#
+#     def get_slice(self, slc: slice):
+#         return KinData(self._fs, self._t0, keys=self._keys, vals=self._vals[:, slc])
+#
+#     def __getitem__(self, item):
+#         if item[:3] not in self._stat_fcns:
+#             return super().__getitem__(item)
+#         if item not in self._cache:
+#             stat_fcn = self._stat_fcns[item[:3]]
+#             val = super().__getitem__(item[3:])
+#             if item.endswith('Ang'):
+#                 val = np.radians(val)
+#                 radians_stat = np.arctan2(stat_fcn(np.sin(val)), stat_fcn(np.cos(val)))
+#                 self._cache[item] = np.degrees(radians_stat) % 360
+#             else:
+#                 self._cache[item] = stat_fcn(val)
+#         return self._cache[item]
+#
+#     def __getattr__(self, item):
+#         return self.__getitem__(item)
+#
+#     def __str__(self):
+#         return "KinData:" + super()._base_str()
+#
+#     def __repr__(self):
+#         return str(self)
 
 # ----------------------------------
+
+def cart2polar(xy):
+    rho = np.linalg.norm(xy, axis=1)
+    theta = np.arctan2(xy[:, 1], xy[:, 0])
+    return rho, theta
 
 
 def numdrv(X: NpPoints, t: NpVec, n=1) -> list[NpPoints]:
@@ -65,21 +127,25 @@ def kinematics(X: NpPoints, t: NpVec, dst_t: NpVec, dx: float = None):
     invars = gk.invariants.geometric_invariants(crv)
 
     t = dst_t
-    vel = crv.vel(t)
-    acc = crv.acc(t)
+    PosX, PosY = crv.pos(t).T
+    spd, spd_ang = cart2polar(crv.vel(t))
+    spd, spd_ang = cart2polar(crv.vel(t))
+    acc, acc_ang = cart2polar(crv.acc(t))
 
-    kin = {'X': crv.pos(),
-           'velx': vel[:, 0],
-           'vely': vel[:, 1],
-           'accx': acc[:, 0],
-           'accy': acc[:, 1],
-           'spd2': np.linalg.norm(vel, axis=1),
-           'acc2': np.linalg.norm(acc, axis=1),
-           'spd0': numdrv(invars['s0'], t)[0],
-           'spd1': numdrv(invars['s1'], t)[0],
-           'crv0': invars['k0'],
-           'crv1': invars['k1'],
-           'crv2': invars['k2'],
-           }
+    kin = {
+           'PosX': PosX,
+           'PosY': PosY,
 
-    return KinData(fs, t0, kin)
+           'EuSpdAng': np.degrees(spd_ang) % 360,
+           'EuAcc': acc,
+           'EuAccAng': np.degrees(acc_ang) % 360,
+
+           'AfSpd': numdrv(invars['s0'], t)[0],
+           'SaSpd': numdrv(invars['s1'], t)[0],
+           'EuSpd': spd,
+
+           'AfCrv': np.abs(invars['k0']),
+           'SaCrv': np.abs(invars['k1']),
+           'EuCrv': np.abs(invars['k2'])}
+
+    return KinData.from_dict(kin, t)

@@ -1,19 +1,9 @@
 import unittest
 import numpy as np
 import numpy.testing
-
 from analysis.procrustes import Procrustes
-from common.shapesbank import shapesbank
-from common.linalg import tform
-
-
-def random_mtx(seed: int = 0, det: float = 1.0, dim: int = 2):
-    rng = np.random.default_rng(seed)
-    A = rng.standard_normal((dim, dim))
-    A[:2, :2] = (det + A[0, 1] * A[1, 0]) / A[0, 0]
-    if dim == 3:
-        A[2] = [0, 0, 1]
-    return A
+from common.testing_utils import shapesbank, random_planar_mtx
+from common.linalg import planar
 
 
 class TestProcrustes(unittest.TestCase):
@@ -23,13 +13,23 @@ class TestProcrustes(unittest.TestCase):
 
     def test_affine(self):
         Y = shapesbank.parabola()
-        A_ = random_mtx(seed=1, dim=3)
-        X = tform.apply(A_, Y)
-        proc = Procrustes(kind='affine')
-        d, A = proc(X, Y)
-        numpy.testing.assert_array_almost_equal(A.flatten(), A_.flatten())
-        self.assertAlmostEqual(d, 0)
+        for seed in range(50):
+            A_ = random_planar_mtx(seed=seed, dim=3, ortho=False)
+            X = planar.apply(A_, Y)
+            proc = Procrustes(kind='affine')
+            d, A = proc(X, Y)
+            numpy.testing.assert_array_almost_equal(A.flatten(), A_.flatten())
+            self.assertAlmostEqual(d, 0)
 
+    def test_ortho(self):
+        Y = shapesbank.parabola()
+        for seed in range(50):
+            A_ = random_planar_mtx(seed=seed, dim=3, ortho=True)
+            X = planar.apply(A_, Y)
+            proc = Procrustes(kind='ortho')
+            d, A = proc(X, Y)
+            numpy.testing.assert_array_almost_equal(A.flatten(), A_.flatten())
+            self.assertAlmostEqual(d, 0)
 
     def test_error(self):
         X1 = shapesbank.parabola()

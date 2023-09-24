@@ -1,5 +1,5 @@
-from src.motorneural.datasets.hatsopoulos import HatsoData
-from src.motorneural.analysis import plot_event_triggered_response, plot_trajectories
+from motorneural.datasets.hatsopoulos import HatsoData
+from motorneural.analysis import plot_event_triggered_response, plot_trajectories
 import matplotlib.pyplot as plt
 
 

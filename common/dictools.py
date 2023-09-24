@@ -7,6 +7,15 @@ from copy import deepcopy
 import pandas as pd
 
 
+def mod_copy_dict(base_dict: dict, mod_dict: dict = None):
+    """ get a modified deep-copy of base_dict """
+    ret = deepcopy(base_dict)
+    if mod_dict is not None:
+        ret.update(mod_dict)
+    return ret
+
+
+
 def dict_product(d):
     """
     For a dictionary of lists: {k0: v0, k1: v1, ..}, (where v0, v1, .. are lists), yields

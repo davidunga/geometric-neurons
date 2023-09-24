@@ -1,28 +1,43 @@
 import numpy as np
-from src.common.linalg import tform, linlsqr
-from scipy.linalg import orthogonal_procrustes
-from src.common.type_utils import *
+import common.linalg as linalg
+from common.type_utils import *
 
 
 class Procrustes:
 
     def __init__(self, kind: str = 'affine'):
+        assert kind in ('affine', 'ortho')
         self.kind = kind
 
     def __call__(self, X: NDArray, Y: NDArray) -> tuple[float, NpMatrix]:
+        """
+        Args:
+            X, Y - 2d point arrays, same size
+        Returns:
+            d - the procrustes distance
+            A - homogeneous matrix [R|t] such that X ~ AY.
+                R is either affine (general) or orthogonal (uniform scaling), according to 'kind'
+        """
 
         if self.kind == 'affine':
-            A = linlsqr(Y, X)
+            A = linalg.lsqr(Y, X)
+
         elif self.kind == 'ortho':
-            t = X.mean(axis=0) - Y.mean(axis=0)
-            R, s = orthogonal_procrustes(X, Y + t)
-            A = np.eye(3)
-            A[:2, :2] = s * R
-            A[:, -1] = t
+            def _normalize(xx):
+                loc = np.mean(xx, axis=0)
+                scale = np.linalg.norm(xx - loc)
+                return (xx - loc) / scale, loc, scale
+            XX, locX, scaleX = _normalize(X)
+            YY, locY, scaleY = _normalize(Y)
+            U, _, Vt = np.linalg.svd(np.dot(XX.T, YY))
+            R = np.dot(U, Vt)
+            s = scaleX / scaleY
+            t = -s * R @ locY + locX
+            A = linalg.planar.to_homogeneous(s * R, t)
         else:
             raise ValueError('Unknown procrustes kind')
 
-        Z = tform.apply(A, Y)
+        Z = linalg.planar.apply(A, Y)
         d = Procrustes.error(X, Z)
 
         return d, A

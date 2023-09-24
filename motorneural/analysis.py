@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
-from src.motorneural.data import Data
-from src.motorneural.typetools import *
+from motorneural.data import Data
+from motorneural.typetools import *
 
 
 def calc_event_triggered_response(data: Data, event="max_spd", tradius=Pair[float],

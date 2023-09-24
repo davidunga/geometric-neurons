@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from src.motorneural.motor import KinData
+from motorneural.motor import KinData
 import numpy as np
 
 

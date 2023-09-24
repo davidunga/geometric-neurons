@@ -1,10 +1,31 @@
 data:
-  name: TP_RJ
-  bin_sz: .01
-  lag: .1
-  seg_dur: .2
-  seg_radcurv_bounds: [.2, 5]
-  proc_kind: affine
-sameness:
-  same_pcntl: .1
-  notSame_pcntl
+    base:
+      name: TP_RJ
+      bin_sz: .01
+      lag: .1
+    segments:
+      dur: .2
+      radcurv_bounds: [.2, 5]
+    pairing:
+      proc_kind: affine
+      dist: proc_dist
+      same_pctl: .1
+      notSame_pctl: .2
+      exclude_pctl: .8
+
+model_selection:
+  score: acc
+  rand_seed: 0
+  folds: 5
+  train_split: .8
+
+embedding:
+    model:
+      dim: 5
+      dropout: .5
+    training:
+      epochs: 1000
+      batch_sz: 64
+      loss_margin: 1
+      optimizer_params:
+        lr: 5e-5

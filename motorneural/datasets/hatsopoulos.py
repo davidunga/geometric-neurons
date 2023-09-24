@@ -48,13 +48,13 @@ Structure:
 # -----------------------
 
 import numpy as np
-from src.motorneural.data import Trial, Data, DatasetMeta
-from src.motorneural.neural import NeuralData, PopulationSpikeTimes
-from src.motorneural.motor import KinData, kinematics
+from motorneural.data import Trial, Data, DatasetMeta
+from motorneural.neural import NeuralData, PopulationSpikeTimes
+from motorneural.motor import KinData, kinematics
 from scipy.io import loadmat
 import os
 import re
-from src.motorneural.typetools import Callable
+from motorneural.typetools import Callable
 
 # -----------------------
 
@@ -67,6 +67,8 @@ _DATASETS = {
 
 # -----------------------
 
+HATSO_DATASETS = list(_DATASETS.keys())
+
 
 class HatsoData(Data):
 
@@ -74,7 +76,8 @@ class HatsoData(Data):
         super().__init__(trials, meta)
 
     @classmethod
-    def make(cls, data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: Callable[None, KinData] = None, max_trials: int = None):
+    def make(cls, data_dir: str, dataset: str, lag: float, bin_sz: float,
+             kin_fnc: Callable[None, KinData] = None, max_trials: int = None):
         return _load_data(data_dir, dataset, lag, bin_sz, kin_fnc, max_trials)
 
 # -----------------------
@@ -162,8 +165,8 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
         # add neural data:
         st = np.ceil(tr_event_tms["st"] / bin_sz) * bin_sz
         end = np.floor((tr_event_tms["end"] - lag) / bin_sz) * bin_sz
-        tr.neural = NeuralData(spktimes=population_spktimes.TimeSlice([st, end]),
-                               fs=1 / bin_sz, tlims=[st, end], neuron_info=neuron_info)
+        tr.neural = NeuralData.from_spike_times(spktimes=population_spktimes.get_time_slice([st, end]),
+                                                fs=1 / bin_sz, tlims=(st, end), neuron_info=neuron_info)
 
         # add kinematic data:
         ifm, ito = np.searchsorted(t, [st + lag, end + lag])
@@ -171,37 +174,39 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
         tr.kin = kin_fnc(X[ifm: ito], t[ifm: ito], dst_t=tr.neural.t + lag, dx=.5)
 
         # add events and properties:
-        tr_event_tms["max_spd"] = tr.kin.t[np.argmax(tr.kin["spd2"])]
+        tr_event_tms["max_spd"] = tr.kin.t[np.argmax(tr.kin["EuSpd"])]
         tr.add_events(tr_event_tms, is_neural=False)
         tr.add_properties(tr_properties)
 
-        assert tr.kin.num_samples == tr.neural.num_samples, (tr.kin.num_samples, tr.neural.num_samples)
+        assert len(tr.kin) == len(tr.neural)
         assert np.max(np.abs((tr.kin.t - tr.neural.t) - lag)) < 1e-6
 
         trials.append(tr)
 
     # normalize spike counts per neuron:
-    all_spkcounts = np.concatenate([tr.neural.spkcounts for tr in trials], axis=1)
-    assert all_spkcounts.shape[0] == trials[0].neural.num_neurons
-    mu = np.mean(all_spkcounts, axis=1)
-    sd = np.maximum(np.std(all_spkcounts, axis=1), np.finfo(float).eps)
+    spikecounts = np.concatenate([tr.neural[:] for tr in trials], axis=0)
+    assert spikecounts.shape[1] == trials[0].neural.num_neurons
+    mu = np.mean(spikecounts, axis=0)
+    sd = np.maximum(np.std(spikecounts, axis=0), np.finfo(float).eps)
     for tr in trials:
-        tr.neural.spkcounts = (tr.neural.spkcounts - mu[:, None]) / sd[:, None]
+        tr.neural._df -= mu
+        tr.neural._df /= sd
 
     # ---
     # sanity-
     # properties that are suppose to be the same for all trials:
-    assert all([tr.neural.neuron_info() == trials[0].neural.neuron_info() for tr in trials])
+    assert all([tr.neural.neuron_info == trials[0].neural.neuron_info for tr in trials])
     assert all([tr.dataset == trials[0].dataset for tr in trials])
     assert all([tr.lag == trials[0].lag for tr in trials])
     assert all([tr.bin_sz == trials[0].bin_sz for tr in trials])
     # verify indices:
     assert [tr.ix for tr in trials] == list(range(len(trials)))
     # verify equal number of neural and kinematic samples, in each trial:
-    assert all([tr.neural.num_samples == tr.kin.num_samples for tr in trials])
+    assert all([len(tr.neural) == len(tr.kin) for tr in trials])
     # ---
 
-    meta = DatasetMeta(**{**{"name": dataset, "sites": set(trials[0].neural.neuron_info("site"))}, **_DATASETS[dataset]})
+    sites = set([v['site'] for v in trials[0].neural.neuron_info.values()])
+    meta = DatasetMeta(**{**{"name": dataset, "sites": sites}, **_DATASETS[dataset]})
 
     return HatsoData(trials, meta)
 
