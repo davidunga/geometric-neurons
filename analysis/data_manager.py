@@ -43,22 +43,30 @@ class DataMgr:
         return pickle.load(self.pkl_path(DataConfig.SEGMENTS).open('rb'))
 
     def load_pairing(self) -> SymmetricPairsData:
-        return pickle.load(self.pkl_path(DataConfig.PAIRING).open('rb'))
+        pairs = pickle.load(self.pkl_path(DataConfig.PAIRING).open('rb'))
+        pairs._data['sameness'] = self._calc_sameness(pairs)
+        return pairs
 
-    def load_same_notSame_pairs(self) -> tuple[SymmetricPairsData, SymmetricPairsData]:
+    def _calc_sameness(self, pairs: SymmetricPairsData):
 
-        pairs = self.load_pairing()
         cfg = self.cfg
         dists = pairs.data[cfg.pairing.dist]
         pctls = np.array([cfg.pairing.same_pctl, cfg.pairing.notSame_pctl, cfg.pairing.exclude_pctl]) * 100
         same_thresh, notSame_thresh, exclude_thresh = np.percentile(dists, pctls)
 
-        same_mask = dists <= same_thresh
-        notSame_mask = (dists < exclude_thresh) & (dists >= notSame_thresh)
+        sameness = np.zeros_like(dists, int)
+        sameness[dists <= same_thresh] = 1
+        sameness[(dists < exclude_thresh) & (dists >= notSame_thresh)] = -1
 
-        same_pairs = SymmetricPairsData(pairs.data.loc[same_mask], pairs.n)
-        notSame_pairs = SymmetricPairsData(pairs.data.loc[notSame_mask], pairs.n)
-        return same_pairs, notSame_pairs
+        return sameness
+
+    @staticmethod
+    def assert_pairs_and_segments_compatibility(pairs: SymmetricPairsData, segments: list[Segment]):
+        """ check that pairs are based on segments, including their ordering """
+        n_samples = 50
+        for seg_ix in range(0, len(segments), len(segments) // n_samples):
+            uids = pairs.data_of_item(seg_ix)[['seg1', 'seg2']].values
+            assert np.all(np.sum(uids == segments[seg_ix].uid, axis=1) == 1)
 
     def make_and_save(self, force: bool = False) -> None:
 
