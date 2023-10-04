@@ -16,6 +16,7 @@ import paths
 import pickle
 from typing import Sequence
 from common.symmetric_pairs import SymmetricPairsData
+from geometric_encoding.triplet import TripletBatcher, SamenessData
 from copy import deepcopy
 import yaml
 from common.dictools import mod_copy_dict
@@ -44,8 +45,15 @@ class DataMgr:
 
     def load_pairing(self) -> SymmetricPairsData:
         pairs = pickle.load(self.pkl_path(DataConfig.PAIRING).open('rb'))
-        pairs._data['sameness'] = self._calc_sameness(pairs)
+        pairs.data['sameness'] = self._calc_sameness(pairs)
         return pairs
+
+    def load_sameness(self) -> tuple[SamenessData, SymmetricPairsData, list[Segment]]:
+        pairs = self.load_pairing()
+        segmets = self.load_segments()
+        self.assert_pairs_and_segments_compatibility(pairs, segmets)
+        sameness_data = SamenessData.from_sameness_sign(sameness=pairs['sameness'], X=[s.kin.EuSpd for s in segmets])
+        return sameness_data, pairs, segmets
 
     def _calc_sameness(self, pairs: SymmetricPairsData):
 
@@ -114,6 +122,7 @@ def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]
     k2_max = 1 / radcurv_bounds[0]
 
     DBG_PLOT = False
+    DRYRUN = True
 
     r = int(round(.5 * dur / data.bin_sz))
     segment_size = 2 * r + 1
@@ -123,6 +132,9 @@ def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]
 
     segments = []
     for trial in data:
+
+        if DRYRUN and trial.ix > 100:
+            break
 
         if trial.ix % 200 == 0:
             print(f'{trial.ix + 1}/{len(data)}')
@@ -203,8 +215,8 @@ def calc_pairing(segments: list[Segment], procrustes_kind: str) -> SymmetricPair
 
 
 def run__make_and_save():
-    force = False
-    for dataset in ['TP_RJ', 'TP_RS']:
+    force = True
+    for dataset in ['TP_RJ', 'TP_RS'][:1]:
         data_cfg = Config.from_default().data
         data_cfg.base.name = dataset
         data_mgr = DataMgr(data_cfg)

@@ -1,5 +1,5 @@
 from numpy.typing import NDArray, ArrayLike
-from typing import Any, Sequence, Generator, Iterator
+from typing import Any, Sequence, Generator, Iterator, Optional
 
 NpVec = NDArray
 NpMatrix = NDArray

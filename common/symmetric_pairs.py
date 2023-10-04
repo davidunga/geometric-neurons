@@ -1,101 +1,121 @@
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
 from common.type_utils import *
 from itertools import combinations, chain
 
 
-def indexes_of_item(k: int, n: int) -> NpVec[int]:
+def iter_indexes_of_item(k: int, n: int) -> Iterator[int]:
     assert 0 <= k < n
     if k == 0:
-        return np.arange(n - 1)
-    step_size = np.ones(n - 1, int)
-    step_size[0] = 0
-    step_size[1:k] = n - 1 - np.arange(1, k)
-    if n > k + 1:
-        step_size[k] = n - k
-    return k - 1 + np.cumsum(step_size)
+        item = 0
+    else:
+        item = k - 1
+        yield item
+        for step_size in range(n - 2, n - k - 1, -1):
+            item += step_size
+            yield item
+        item += n - k
+    yield from range(item, item + n - 1 - k)
 
 
 def iter_pairs(n: int) -> Iterator[tuple[int, int]]:
     return combinations(range(n), 2)
 
 
-def num_pairs(num_items) -> int:
-    return num_items * (num_items - 1) // 2
+def num_pairs(num_items: int) -> int:
+    return int(num_items * (num_items - 1) / 2)
 
 
-def num_items(num_pairs) -> int:
-    return (1 + np.sqrt(1 + 8 * num_pairs)) // 2
+def num_items(num_pairs: int) -> int:
+    n = (1 + np.sqrt(1 + 8 * num_pairs)) / 2
+    assert n.is_integer()
+    return int(n)
 
 
-class SymmetricPairs:
+class SymmetricPairsData:
 
-    def __init__(self, n: int, participating_indexes: Sequence[int] = None):
+    _n_limit = 2 ** 16
+
+    def __init__(self, n: int, data: pd.DataFrame = None, group_by: (str, pd.Series) = None):
         self.n = n
-        if participating_indexes is None:
-            self.participating_indexes = set(range(num_pairs(self.n)))
+        self.data = data
+        self._group_by = group_by
+        self._participating_indexes: set = None
+        self._validate()
+
+    def _validate(self):
+        assert self.n < self._n_limit
+        if self.group_labels is not None:
+            assert self.group_labels.index.max() < num_pairs(self.n)
+
+    @property
+    def group_labels(self):
+        if self._group_by is None:
+            return None
+        if isinstance(self._group_by, str):
+            return self.data[self._group_by]
+        assert isinstance(self._group_by, pd.Series)
+        return self._group_by
+
+    def _group_of(self, index):
+        return self.group_labels[index]
+
+    def _is_matching(self, index, label) -> bool:
+        if index not in self.participating_indexes:
+            return False
         else:
-            self.participating_indexes = set(participating_indexes)
+            return label is None or self._group_of(index) == label
 
-    def indexes_of_item(self, item: int) -> list[int]:
-        """ index of all pairs which include item """
-        return [index for index in indexes_of_item(item, self.n)
-                if index in self.participating_indexes]
+    def iter_indexes_of_item(self, item: int, label=None) -> Iterator[int]:
+        for index in iter_indexes_of_item(item, self.n):
+            if self._is_matching(index, label):
+                yield index
 
-    def partners_of_item(self, item: int) -> list[int]:
-        """ pairing partners of item """
-        all_indexes = self.indexes_of_item(item)
-        all_partners = chain(range(item), range(item + 1, self.n))
-        return [partner for partner, index in zip(all_partners, all_indexes)
-                if index in self.participating_indexes]
+    def iter_partners_of_item(self, item: int, label=None) -> Iterator[int]:
+        indexes = self.iter_indexes_of_item(item)
+        partners = chain(range(item), range(item + 1, self.n))
+        for partner, index in zip(partners, indexes):
+            if self._is_matching(index, label):
+                yield partner
 
-    def iter_pairs(self) -> Iterator[tuple[int, int]]:
+    def iter_pairs(self, label=None) -> Iterator[tuple[int, int]]:
         for index, pair in enumerate(iter_pairs(self.n)):
-            if index in self.participating_indexes:
+            if self._is_matching(index, label):
                 yield pair
+
+    def iter_labeled_pairs(self) -> Iterator[tuple[int, int, Any]]:
+        for index, pair in enumerate(iter_pairs(self.n)):
+            group = self._group_of(index)
+            if group is not None:
+                yield pair, group
+
+    def data_of_item(self, item, label=None) -> pd.DataFrame:
+        return self.data.loc[self.iter_indexes_of_item(item, label)]
+
+    def __getitem__(self, item):
+        return self.data[item]
+
+    @property
+    def participating_indexes(self):
+        if self._participating_indexes is None:
+            if self._group_by is None:
+                self._participating_indexes = set(range(num_pairs(self.n)))
+            else:
+                self._participating_indexes = set(list(self.group_labels.index))
+        return self._participating_indexes
 
     def __len__(self):
         return len(self.participating_indexes)
 
-
-class SymmetricPairsData(SymmetricPairs):
-    """
-    Wrapper for a dataframe of symmetric-pairwise relations.
-    """
-
-    def __init__(self, data: pd.DataFrame, n: int):
-        """
-        Args:
-            data: dataframe, indexed according to pairs.
-            n: total number of items pairing was computed over.
-        Examples:
-            See example() below
-        """
-        self._data = data
-        super().__init__(n, list(data.index))
-        assert len(self) == self.shape[0]
+    def __getstate__(self) -> dict:
+        return {'n': self.n, 'data': self.data, 'group_by': self._group_by}
 
     def __setstate__(self, state) -> None:
-        self._data = state['data']
         self.n = state['n']
-        self.participating_indexes = set(list(self.data.index))
-        assert len(self) == self.shape[0]
-
-    @property
-    def data(self) -> pd.DataFrame:
-        return self._data
-
-    def data_of_item(self, item: int) -> pd.DataFrame:
-        return self._data.loc[self.indexes_of_item(item)]
-
-    def __getstate__(self) -> dict:
-        return {'data': self.data, 'n': self.n}
-
-    @property
-    def shape(self) -> tuple[int, int]:
-        return self._data.shape
-
+        self.data = state['data']
+        self._group_by = state['group_by']
+        self._participating_indexes = None
+        self._validate()
 
 def example():
 
@@ -113,8 +133,8 @@ def example():
         print(symm_pairs_data.data_of_item(0).to_string())
         print("\nRows that contain item 2:")
         print(symm_pairs_data.data_of_item(2).to_string())
-        print("\nOthers of item 0:", symm_pairs_data.partners_of_item(0))
-        print("Others of item 2:", symm_pairs_data.partners_of_item(2))
+        print("\nOthers of item 0:", list(symm_pairs_data.iter_partners_of_item(0)))
+        print("Others of item 2:", list(symm_pairs_data.iter_partners_of_item(2)))
         print("Unravel:", list(symm_pairs_data.iter_pairs()))
 
     num_pts = 5
