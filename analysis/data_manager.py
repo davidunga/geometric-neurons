@@ -16,7 +16,7 @@ import paths
 import pickle
 from typing import Sequence
 from common.symmetric_pairs import SymmetricPairsData
-from geometric_encoding.triplet import TripletBatcher, SamenessData
+from geometric_encoding.triplet import SamenessData
 from copy import deepcopy
 import yaml
 from common.dictools import mod_copy_dict
@@ -52,7 +52,9 @@ class DataMgr:
         pairs = self.load_pairing()
         segmets = self.load_segments()
         self.assert_pairs_and_segments_compatibility(pairs, segmets)
-        sameness_data = SamenessData.from_sameness_sign(sameness=pairs['sameness'], X=[s.kin.EuSpd for s in segmets])
+        sameness_data = SamenessData.from_sameness_sign(
+            sameness=pairs['sameness'],
+            X=[s.kin.EuSpd for s in segmets])
         return sameness_data, pairs, segmets
 
     def _calc_sameness(self, pairs: SymmetricPairsData):

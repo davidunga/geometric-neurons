@@ -40,31 +40,52 @@ class SymmetricPairsData:
         self.n = n
         self.data = data
         self._group_by = group_by
+        self._group_labels: pd.Series = None
         self._participating_indexes: set = None
         self._validate()
 
+    def __setstate__(self, state) -> None:
+        self.__init__(**state)
+
+    def __getstate__(self) -> dict:
+        return {'n': self.n, 'data': self.data, 'group_by': self._group_by}
+
     def _validate(self):
         assert self.n < self._n_limit
-        if self.group_labels is not None:
-            assert self.group_labels.index.max() < num_pairs(self.n)
+        assert self.group_labels.index.max() < num_pairs(self.n)
 
     @property
     def group_labels(self):
-        if self._group_by is None:
-            return None
-        if isinstance(self._group_by, str):
-            return self.data[self._group_by]
-        assert isinstance(self._group_by, pd.Series)
-        return self._group_by
+        if self._group_labels is None:
+            if self._group_by is None:
+                self._group_labels = pd.Series([None] * num_pairs(self.n))
+            elif isinstance(self._group_by, str):
+                self._group_labels = self.data[self._group_by]
+                assert not np.any(self._group_labels.isna()), "NA labels are not allowed"
+            else:
+                assert isinstance(self._group_by, pd.Series)
+                self._group_labels = self._group_by
+                assert not np.any(self._group_labels.isna()), "NA labels are not allowed"
+        return self._group_labels
 
     def _group_of(self, index):
+        """ group label of index.
+            raises KeyError if index is not participating.
+            returns None if no groups were specified (=all indexes are participating)
+        """
         return self.group_labels[index]
 
     def _is_matching(self, index, label) -> bool:
-        if index not in self.participating_indexes:
+        """
+        if label is None - returns True iff index is participating
+        if label is not None - returns True iff index's label matches given label
+        """
+        try:
+            group = self._group_of(index)
+        except KeyError:
+            # index is not participating
             return False
-        else:
-            return label is None or self._group_of(index) == label
+        return label is None or group == label
 
     def iter_indexes_of_item(self, item: int, label=None) -> Iterator[int]:
         for index in iter_indexes_of_item(item, self.n):
@@ -85,9 +106,10 @@ class SymmetricPairsData:
 
     def iter_labeled_pairs(self) -> Iterator[tuple[int, int, Any]]:
         for index, pair in enumerate(iter_pairs(self.n)):
-            group = self._group_of(index)
-            if group is not None:
-                yield pair, group
+            try:
+                yield pair, self._group_of(index)
+            except KeyError:
+                continue
 
     def data_of_item(self, item, label=None) -> pd.DataFrame:
         return self.data.loc[self.iter_indexes_of_item(item, label)]
@@ -98,24 +120,12 @@ class SymmetricPairsData:
     @property
     def participating_indexes(self):
         if self._participating_indexes is None:
-            if self._group_by is None:
-                self._participating_indexes = set(range(num_pairs(self.n)))
-            else:
-                self._participating_indexes = set(list(self.group_labels.index))
+            self._participating_indexes = set(list(self.group_labels.index))
         return self._participating_indexes
 
     def __len__(self):
-        return len(self.participating_indexes)
+        return len(self.group_labels)
 
-    def __getstate__(self) -> dict:
-        return {'n': self.n, 'data': self.data, 'group_by': self._group_by}
-
-    def __setstate__(self, state) -> None:
-        self.n = state['n']
-        self.data = state['data']
-        self._group_by = state['group_by']
-        self._participating_indexes = None
-        self._validate()
 
 def example():
 
