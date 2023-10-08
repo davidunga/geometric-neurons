@@ -7,7 +7,7 @@ from copy import deepcopy
 import pandas as pd
 
 from motorneural.typetools import *
-from motorneural.uniformly_sampled import make_time_bins
+from motorneural.uniformly_sampled import UniformGrid
 import numpy as np
 
 
@@ -101,13 +101,14 @@ class NeuralData(NpDataFrame):
                          spktimes: PopulationSpikeTimes,
                          tlims: tuple[float, float],
                          neuron_info: dict[str, dict] = None):
+        dt = 1 / fs
         if tlims is None:
             tms = spktimes.population_spktimes()[0]
-            tlims = (tms[0] - 1 / fs, tms[-1] + 1 / fs)
-        data = spktimes.spike_counts(bin_edges=make_time_bins(fs, tlims))
+            tlims = (tms[0] - dt, tms[-1] + dt)
+        time_grid = UniformGrid(dt)
+        data = spktimes.spike_counts(bin_edges=time_grid.get_ticks(tlims, margin=True))
         df = pd.DataFrame.from_dict(data)
-        t = make_time_bins(fs, tlims, margin=False)[:-1]
-        return cls(df, meta=neuron_info, t=t)
+        return cls(df, meta=neuron_info, t=time_grid.get_ticks(tlims, margin=False)[:-1])
 
     @property
     def neuron_info(self) -> dict:

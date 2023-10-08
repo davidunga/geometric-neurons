@@ -1,7 +1,8 @@
 from typing import Sequence
 import pandas as pd
 import numpy as np
-
+from motorneural.uniformly_sampled import UniformGrid
+from common.sigproc import reduce_rows
 
 class NpDataFrame:
 
@@ -31,6 +32,20 @@ class NpDataFrame:
         slc = slice(*args)
         return type(self)(self._df.iloc[slc], aliases=self._aliases, meta=self._meta,
                           t=self._t[slc] if self._t is not None else None)
+
+    def get_flat_series(self) -> pd.Series:
+        s = self._df.stack()
+        s.index = [f'{col_name}.{index}' for index, col_name in s.index]
+        return s
+
+    def get_binned(self, *args, win_sz: int = None, bin_sz: float = None):
+        assert (win_sz is None) ^ (bin_sz is None)
+        if bin_sz is not None:
+            win_sz = int(.5 + bin_sz / self.bin_size)
+            assert abs(win_sz - bin_sz / self.bin_size) < 1e-6, "bin_sz must be an integer multiply of current bin size"
+        values = reduce_rows(self[:], win_sz, 'mean')
+        t = None if self._t is None else reduce_rows(self._t, win_sz, 'mean')
+        return type(self)(pd.DataFrame(values, columns=self.columns), aliases=self._aliases, meta=self._meta, t=t)
 
     @property
     def columns(self):
@@ -68,6 +83,10 @@ class NpDataFrame:
     @property
     def duration(self) -> float:
         return float(np.diff(self.t[[0, -1]]))
+
+    @property
+    def bin_size(self) -> float:
+        return UniformGrid.from_samples(self.t).dt
 
     def time2index(self, tm: float) -> int:
         return np.searchsorted(self.t, tm)

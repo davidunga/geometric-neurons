@@ -42,12 +42,12 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         return len(self._triplet_participating_items)
 
     @classmethod
-    def from_sameness_sign(cls, sameness: Sequence, X: ArrayLike):
+    def from_sameness_sign(cls, sameness: Sequence, X: ArrayLike, *args, **kwargs):
         n = symmetric_pairs.num_items(len(sameness))
         sameness = sameness[sameness != 0]
         sameness[sameness == -1] = 'notSame'
         sameness[sameness == 1] = 'same'
-        return cls(X=X, n=n, group_by=sameness)
+        return cls(X=X, n=n, group_by=sameness, *args, **kwargs)
 
     def to(self, *args, **kwargs):
         if not torch.is_tensor(self.X):
@@ -58,13 +58,13 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
     @property
     def same_counts(self) -> Counter:
         if self._same_counts is None:
-            self._same_counts = Counter(item for item_pair in self.iter_pairs('same') for item in item_pair)
+            self._same_counts = Counter(self.pairs[['item1', 'item2']].loc[self.pairs.group == 'same'].values.flatten().tolist())
         return self._same_counts
 
     @property
     def notSame_counts(self) -> Counter:
         if self._notSame_counts is None:
-            self._notSame_counts = Counter(item for item_pair in self.iter_pairs('notSame') for item in item_pair)
+            self._notSame_counts = Counter(self.pairs[['item1', 'item2']].loc[self.pairs.group == 'notSame'].values.flatten().tolist())
         return self._notSame_counts
 
     def prevalence_counts(self, thresh: int = 0) -> NpVec:
@@ -88,8 +88,8 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
             i = np.searchsorted(cumulative_proba, rng.random())
             return item_partners[i]
 
-        positives = [_sample(list(self.iter_partners_of_item(a, 'same'))) for a in anchors]
-        negatives = [_sample(list(self.iter_partners_of_item(a, 'notSame'))) for a in anchors]
+        positives = [_sample(self.partners_of_item(a, 'same')) for a in anchors]
+        negatives = [_sample(self.partners_of_item(a, 'notSame')) for a in anchors]
 
         return anchors, positives, negatives
 
@@ -117,6 +117,7 @@ class SamenessEval:
 
     @property
     def tscore(self):
+        # returns the t-test statistic if it's statistically significant, else 0
         return 0 if self.ttest.pvalue > .05 else self.ttest.statistic
 
     def __init__(self,

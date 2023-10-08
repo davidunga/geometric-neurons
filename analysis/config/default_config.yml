@@ -12,6 +12,9 @@ data:
       same_pctl: .1
       notSame_pctl: .2
       exclude_pctl: .8
+    sameness:
+      flat_neural_bin_sz: .05
+      triplet_min_prevalence: 5
 
 model_selection:
   score: acc
@@ -25,7 +28,8 @@ embedding:
       dropout: .5
     training:
       epochs: 1000
-      batch_sz: 64
-      loss_margin: 1
-      optimizer_params:
+      batch_size: 64
+      loss_margin: 1.0
+      optim_params:
+        kind: Adam
         lr: 5e-5

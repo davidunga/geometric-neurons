@@ -35,13 +35,29 @@ def num_items(num_pairs: int) -> int:
 class SymmetricPairsData:
 
     _n_limit = 2 ** 16
+    _no_group = "__noGroup__"
 
     def __init__(self, n: int, data: pd.DataFrame = None, group_by: (str, pd.Series) = None):
+
         self.n = n
         self.data = data
         self._group_by = group_by
-        self._group_labels: pd.Series = None
-        self._participating_indexes: set = None
+
+        default = self._no_group if data is None and group_by is None else None
+        self.pairs = pd.DataFrame(dict(group=[default] * num_pairs(self.n)))
+
+        if isinstance(group_by, str):
+            self.pairs['group'][self.data.index] = self.data[group_by]
+        elif isinstance(group_by, pd.Series):
+            self.pairs['group'][group_by.index] = group_by.values
+        elif group_by is None and data is not None:
+            self.pairs['group'][self.data.index] = self._no_group
+        else:
+            raise ValueError()
+
+        self.pairs[['item1', 'item2']] = np.fromiter(iter_pairs(self.n), dtype=np.dtype((int, 2)))
+        self._len = sum(~self.pairs['group'].isna())
+
         self._validate()
 
     def __setstate__(self, state) -> None:
@@ -52,79 +68,32 @@ class SymmetricPairsData:
 
     def _validate(self):
         assert self.n < self._n_limit
-        assert self.group_labels.index.max() < num_pairs(self.n)
+        assert self.pairs.index.max() < num_pairs(self.n)
 
-    @property
-    def group_labels(self):
-        if self._group_labels is None:
-            if self._group_by is None:
-                self._group_labels = pd.Series([None] * num_pairs(self.n))
-            elif isinstance(self._group_by, str):
-                self._group_labels = self.data[self._group_by]
-                assert not np.any(self._group_labels.isna()), "NA labels are not allowed"
-            else:
-                assert isinstance(self._group_by, pd.Series)
-                self._group_labels = self._group_by
-                assert not np.any(self._group_labels.isna()), "NA labels are not allowed"
-        return self._group_labels
+    def indexes_of_item(self, item: int, label=None) -> NpVec[int]:
+        labels = self.pairs['group'][iter_indexes_of_item(item, self.n)]
+        if label is None:
+            mask = labels.notna()
+        else:
+            mask = labels == label
+        return mask.index[mask]
 
-    def _group_of(self, index):
-        """ group label of index.
-            raises KeyError if index is not participating.
-            returns None if no groups were specified (=all indexes are participating)
-        """
-        return self.group_labels[index]
+    def partners_of_item(self, item: int, label=None) -> NpVec[int]:
+        indexes = self.indexes_of_item(item, label)
+        partners = self.pairs.loc[indexes][['item1', 'item2']].to_numpy().flatten()
+        return partners[partners != item]
 
-    def _is_matching(self, index, label) -> bool:
-        """
-        if label is None - returns True iff index is participating
-        if label is not None - returns True iff index's label matches given label
-        """
-        try:
-            group = self._group_of(index)
-        except KeyError:
-            # index is not participating
-            return False
-        return label is None or group == label
-
-    def iter_indexes_of_item(self, item: int, label=None) -> Iterator[int]:
-        for index in iter_indexes_of_item(item, self.n):
-            if self._is_matching(index, label):
-                yield index
-
-    def iter_partners_of_item(self, item: int, label=None) -> Iterator[int]:
-        indexes = self.iter_indexes_of_item(item)
-        partners = chain(range(item), range(item + 1, self.n))
-        for partner, index in zip(partners, indexes):
-            if self._is_matching(index, label):
-                yield partner
-
-    def iter_pairs(self, label=None) -> Iterator[tuple[int, int]]:
-        for index, pair in enumerate(iter_pairs(self.n)):
-            if self._is_matching(index, label):
-                yield pair
-
-    def iter_labeled_pairs(self) -> Iterator[tuple[int, int, Any]]:
-        for index, pair in enumerate(iter_pairs(self.n)):
-            try:
-                yield pair, self._group_of(index)
-            except KeyError:
-                continue
+    def labeled_pairs(self) -> pd.DataFrame:
+        return self.pairs.loc[self.pairs['group'].notna()]
 
     def data_of_item(self, item, label=None) -> pd.DataFrame:
-        return self.data.loc[self.iter_indexes_of_item(item, label)]
+        return self.data.loc[self.indexes_of_item(item, label)]
 
     def __getitem__(self, item):
         return self.data[item]
 
-    @property
-    def participating_indexes(self):
-        if self._participating_indexes is None:
-            self._participating_indexes = set(list(self.group_labels.index))
-        return self._participating_indexes
-
     def __len__(self):
-        return len(self.group_labels)
+        return self._len
 
 
 def example():
@@ -143,9 +112,9 @@ def example():
         print(symm_pairs_data.data_of_item(0).to_string())
         print("\nRows that contain item 2:")
         print(symm_pairs_data.data_of_item(2).to_string())
-        print("\nOthers of item 0:", list(symm_pairs_data.iter_partners_of_item(0)))
-        print("Others of item 2:", list(symm_pairs_data.iter_partners_of_item(2)))
-        print("Unravel:", list(symm_pairs_data.iter_pairs()))
+        print("\nOthers of item 0:", list(symm_pairs_data.partners_of_item(0)))
+        print("Others of item 2:", list(symm_pairs_data.partners_of_item(2)))
+        print("Unravel:\n", symm_pairs_data.labeled_pairs().to_string())
 
     num_pts = 5
     data = _make_mock_dists_data(num_pts=num_pts)

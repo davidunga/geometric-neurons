@@ -21,13 +21,28 @@ from copy import deepcopy
 import yaml
 from common.dictools import mod_copy_dict
 from analysis.config import DataConfig, Config
+import functools
+
+def verbolize(verbose: int = 1):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if verbose > 0:
+                print(f"{func.__name__}...")
+            result = func(*args, **kwargs)
+            if verbose > 0:
+                print(f"{func.__name__} done.")
+            return result
+        return wrapper
+    return decorator
 
 
 class DataMgr:
 
-    def __init__(self, data_cfg: DataConfig, data_root: (str, Path) = paths.PROJECT_DATA_DIR):
+    def __init__(self, data_cfg: DataConfig, data_root: (str, Path) = paths.PROJECT_DATA_DIR, verbose: int = 1):
         self.cfg: DataConfig = data_cfg
         self.data_root: Path = Path(data_root)
+        self.verbose = verbose
         assert self.data_root.exists()
 
     @classmethod
@@ -37,38 +52,49 @@ class DataMgr:
     def pkl_path(self, level: DataConfig.Level) -> Path:
         return paths.PROJECT_DATA_DIR / (self.cfg.str(level) + f'.{level}.pkl')
 
+    @verbolize()
     def load_base_data(self) -> Data:
         return pickle.load(self.pkl_path(DataConfig.BASE).open('rb'))
 
+    @verbolize()
     def load_segments(self) -> list[Segment]:
         return pickle.load(self.pkl_path(DataConfig.SEGMENTS).open('rb'))
 
+    @verbolize()
     def load_pairing(self) -> SymmetricPairsData:
+
+        def _calc_sameness_sign():
+            cfg = self.cfg
+            dists = pairs.data[cfg.pairing.dist]
+            pctls = np.array([cfg.pairing.same_pctl, cfg.pairing.notSame_pctl, cfg.pairing.exclude_pctl]) * 100
+            same_thresh, notSame_thresh, exclude_thresh = np.percentile(dists, pctls)
+            sameness = np.zeros_like(dists, int)
+            sameness[dists <= same_thresh] = 1
+            sameness[(dists < exclude_thresh) & (dists >= notSame_thresh)] = -1
+            return sameness
+
         pairs = pickle.load(self.pkl_path(DataConfig.PAIRING).open('rb'))
-        pairs.data['sameness'] = self._calc_sameness(pairs)
+        pairs.data['sameness'] = _calc_sameness_sign()
         return pairs
 
+    def get_neurals_df(self, segmets: list[Segment]) -> pd.DataFrame:
+        """ i-th row = processed (reduced and flattened) activations of i-th segment.
+            column names = '<neuron_name>.<time_bin>'
+        """
+        serieses = [s.neural.get_binned(bin_sz=self.cfg.sameness.flat_neural_bin_sz)._df.stack() for s in segmets]
+        df = pd.concat(serieses, axis=1)
+        df.index = [f'{col_name}.{index}' for index, col_name in df.index]
+        return df.T
+
+    @verbolize()
     def load_sameness(self) -> tuple[SamenessData, SymmetricPairsData, list[Segment]]:
         pairs = self.load_pairing()
         segmets = self.load_segments()
         self.assert_pairs_and_segments_compatibility(pairs, segmets)
         sameness_data = SamenessData.from_sameness_sign(
-            sameness=pairs['sameness'],
-            X=[s.kin.EuSpd for s in segmets])
+            X=self.get_neurals_df(segmets), sameness=pairs['sameness'],
+            triplet_min_prevalence=self.cfg.sameness.triplet_min_prevalence)
         return sameness_data, pairs, segmets
-
-    def _calc_sameness(self, pairs: SymmetricPairsData):
-
-        cfg = self.cfg
-        dists = pairs.data[cfg.pairing.dist]
-        pctls = np.array([cfg.pairing.same_pctl, cfg.pairing.notSame_pctl, cfg.pairing.exclude_pctl]) * 100
-        same_thresh, notSame_thresh, exclude_thresh = np.percentile(dists, pctls)
-
-        sameness = np.zeros_like(dists, int)
-        sameness[dists <= same_thresh] = 1
-        sameness[(dists < exclude_thresh) & (dists >= notSame_thresh)] = -1
-
-        return sameness
 
     @staticmethod
     def assert_pairs_and_segments_compatibility(pairs: SymmetricPairsData, segments: list[Segment]):
@@ -124,7 +150,7 @@ def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]
     k2_max = 1 / radcurv_bounds[0]
 
     DBG_PLOT = False
-    DRYRUN = True
+    DRYRUN = False
 
     r = int(round(.5 * dur / data.bin_sz))
     segment_size = 2 * r + 1
@@ -217,8 +243,8 @@ def calc_pairing(segments: list[Segment], procrustes_kind: str) -> SymmetricPair
 
 
 def run__make_and_save():
-    force = True
-    for dataset in ['TP_RJ', 'TP_RS'][:1]:
+    force = False
+    for dataset in ['TP_RJ', 'TP_RS']:
         data_cfg = Config.from_default().data
         data_cfg.base.name = dataset
         data_mgr = DataMgr(data_cfg)
