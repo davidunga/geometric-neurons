@@ -1,8 +1,6 @@
-from common.testing_utils import shapesbank
 import unittest
 import numpy as np
-from common.type_utils import *
-from common.linalg import planar, lsqr
+from common.utils.linalg import planar, lsqr
 
 
 class TestTform(unittest.TestCase):

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
-from common.type_utils import *
-from itertools import combinations, chain
+from common.utils.typings import *
+from itertools import combinations
 
 
 def iter_indexes_of_item(k: int, n: int) -> Iterator[int]:
@@ -31,33 +31,49 @@ def num_items(num_pairs: int) -> int:
     assert n.is_integer()
     return int(n)
 
+from common.utils.devtools import verbolize
+
 
 class SymmetricPairsData:
+    """
+    pairwise information is held a dataframe (self.pairs) with columns: [item1, item2, group]
+    self.pairs is full rank, i.e. has indexes 0,1,..,n(n-1)/2 - 1, n=number of items.
+    if an index is missing, self.pairs.group[index] is None
+    otherwise, self.pairs.group[index] if the group of the index, or self._no_group - if no groups were specified.
+    """
 
     _n_limit = 2 ** 16
     _no_group = "__noGroup__"
 
-    def __init__(self, n: int, data: pd.DataFrame = None, group_by: (str, pd.Series) = None):
+    def __init__(self, n: int, data: pd.DataFrame = None, group_by: (str, pd.Series) = None,
+                 pairs: pd.DataFrame = None):
 
         self.n = n
         self.data = data
         self._group_by = group_by
+        self._label_set: set
+        self._item_counts = None
 
-        default = self._no_group if data is None and group_by is None else None
-        self.pairs = pd.DataFrame(dict(group=[default] * num_pairs(self.n)))
-
-        if isinstance(group_by, str):
-            self.pairs['group'][self.data.index] = self.data[group_by]
-        elif isinstance(group_by, pd.Series):
-            self.pairs['group'][group_by.index] = group_by.values
-        elif group_by is None and data is not None:
-            self.pairs['group'][self.data.index] = self._no_group
+        if pairs is not None:
+            self.pairs = pairs
         else:
-            raise ValueError()
+            self.pairs = pd.DataFrame.from_records([(None, item1, item2) for (item1, item2) in iter_pairs(self.n)],
+                                                   columns=['group', 'item1', 'item2'])
+            if group_by is None:
+                if data is None:
+                    self.pairs['group'] = self._no_group
+                else:
+                    self.pairs.loc[self.data.index, 'group'] = self._no_group
+            elif isinstance(group_by, pd.Series):
+                self.pairs.loc[group_by.index, 'group'] = group_by.values
+            else:
+                assert isinstance(group_by, str)
+                assert self.data is not None
+                self.pairs.loc[self.data.index, 'group'] = self.data[group_by]
 
-        self.pairs[['item1', 'item2']] = np.fromiter(iter_pairs(self.n), dtype=np.dtype((int, 2)))
-        self._len = sum(~self.pairs['group'].isna())
-
+        self._label_set = set(self.pairs['group'].values) - {None}
+        self._len = sum(self.pairs['group'].notna())
+        self._num_items = None
         self._validate()
 
     def __setstate__(self, state) -> None:
@@ -68,20 +84,33 @@ class SymmetricPairsData:
 
     def _validate(self):
         assert self.n < self._n_limit
-        assert self.pairs.index.max() < num_pairs(self.n)
+        assert np.all(self.pairs.index == pd.RangeIndex(num_pairs(self.n)))
 
-    def indexes_of_item(self, item: int, label=None) -> NpVec[int]:
-        labels = self.pairs['group'][iter_indexes_of_item(item, self.n)]
-        if label is None:
-            mask = labels.notna()
-        else:
-            mask = labels == label
-        return mask.index[mask]
+    def indexes_of_item(self, item: int, label=None) -> pd.Index:
+        labels = self.pairs.loc[iter_indexes_of_item(item, self.n), 'group']
+        mask = labels.notna() if label is None else labels == label
+        indexes = mask.index[mask]
+        assert len(indexes), f"Item {item} does not appear in group={label}"
+        return indexes
 
-    def partners_of_item(self, item: int, label=None) -> NpVec[int]:
-        indexes = self.indexes_of_item(item, label)
-        partners = self.pairs.loc[indexes][['item1', 'item2']].to_numpy().flatten()
-        return partners[partners != item]
+    def partners_of_item(self, item: int):
+        indexes = self.indexes_of_item(item)
+        partners = self.pairs.loc[indexes]
+        ret = {}
+        for label in self._label_set:
+            ret[label] = partners.loc[partners['group'] == label, ['item1', 'item2']].to_numpy().flatten()
+            ret[label] = ret[label][ret[label] != item]
+        return ret if self.is_grouped else ret[self._no_group]
+
+    def item_pairs(self, label=None) -> NpPairs[int]:
+        indexes = self.pairs.group.notna() if label is None else self.pairs.group == label
+        return self.pairs.loc[indexes, ['item1', 'item2']].values
+
+    def is_grouped(self):
+        return self._label_set != {self._no_group}
+
+    def item_set(self, label=None) -> set[int]:
+        return set(self.item_pairs(label).flatten())
 
     def labeled_pairs(self) -> pd.DataFrame:
         return self.pairs.loc[self.pairs['group'].notna()]
@@ -94,6 +123,11 @@ class SymmetricPairsData:
 
     def __len__(self):
         return self._len
+
+    def num_items(self) -> int:
+        if self._num_items is None:
+            self._num_items = len(self.item_set())
+        return self._num_items
 
 
 def example():

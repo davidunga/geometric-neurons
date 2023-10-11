@@ -6,7 +6,7 @@ The core functionality here should be viewed as scripts, to be modified manually
 from config import get_default_config, make_analysis_name, get_cfg_dataset_name, output_dir
 import json
 from evaluation import eval_model_file
-from train import train
+from common.pairwise.train import train
 from utils.utils import hash_id, part2pcnt
 from utils import dictools
 import os

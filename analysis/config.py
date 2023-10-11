@@ -9,8 +9,10 @@ from dataclasses import dataclass
 import paths
 import yaml
 from munch import munchify, Munch
+from hashlib import sha1
 
-_default_config_dict = yaml.safe_load((paths.PROJECT_CONFIG_DIR / 'default_config.yml').open())
+
+_default_config_dict = yaml.safe_load((paths.CONFIG_DIR / 'default_config.yml').open())
 
 
 @dataclass(init=False)
@@ -25,6 +27,16 @@ class Config:
     @classmethod
     def from_default(cls):
         return cls(deepcopy(_default_config_dict))
+
+    def str(self):
+        hash_str_sz = 6
+        hash_str = sha1(str(self.__dict__()).encode('utf-8')).hexdigest()[:hash_str_sz]
+        return self.data.str(DataConfig.PAIRING) + " " + hash_str
+
+    def __dict__(self) -> dict:
+        return {"data": self.data.__dict__,
+                "model_selection": self.model_selection.__dict__,
+                "embedding": self.embedding.__dict__}
 
 
 class DataConfig(Munch):

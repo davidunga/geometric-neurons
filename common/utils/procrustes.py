@@ -1,6 +1,6 @@
 import numpy as np
-import common.linalg as linalg
-from common.type_utils import *
+import common.utils.linalg as linalg
+from common.utils.typings import *
 
 
 class Procrustes:

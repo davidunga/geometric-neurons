@@ -17,10 +17,7 @@ data:
       triplet_min_prevalence: 5
 
 model_selection:
-  score: acc
-  rand_seed: 0
   folds: 5
-  train_split: .8
 
 embedding:
     model:
@@ -28,8 +25,8 @@ embedding:
       dropout: .5
     training:
       epochs: 1000
-      batch_size: 64
+      batch_size: 128
       loss_margin: 1.0
       optim_params:
-        kind: Adam
-        lr: 5e-5
+        kind: SGD
+        lr: 5.e-3

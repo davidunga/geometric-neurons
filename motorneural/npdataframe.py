@@ -2,7 +2,8 @@ from typing import Sequence
 import pandas as pd
 import numpy as np
 from motorneural.uniformly_sampled import UniformGrid
-from common.sigproc import reduce_rows
+from common.utils.sigproc import reduce_rows
+
 
 class NpDataFrame:
 

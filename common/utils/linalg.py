@@ -1,5 +1,5 @@
 import numpy as np
-from common.type_utils import *
+from common.utils.typings import *
 
 
 class planar:

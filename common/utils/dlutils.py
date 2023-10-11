@@ -4,7 +4,7 @@ import torch
 from typing import Hashable, Callable, Sequence
 from dataclasses import dataclass
 import numpy as np
-from time import time
+from pathlib import Path
 
 
 def get_optimizer(model_params, optim_params: str | dict):
@@ -16,8 +16,8 @@ def get_optimizer(model_params, optim_params: str | dict):
 class checkpoint:
 
     @staticmethod
-    def load(fname: str):
-        items = torch.load(fname)
+    def load(fname: str | Path):
+        items = torch.load(str(fname))
         model = items['model']
         model.load_state_dict(items['state_dict'])
         optimizer = items['optimizer']
@@ -27,16 +27,20 @@ class checkpoint:
         return model, optimizer, meta
 
     @staticmethod
-    def get_meta(fname: str):
-        return torch.load(fname)['meta']
+    def get_meta(fname: str | Path):
+        return torch.load(str(fname))['meta']
 
     @staticmethod
-    def dump(fname: str, model: torch.nn.Module, optimizer: torch.optim.Optimizer = None, meta: Hashable = None):
+    def dump(fname: str | Path,
+             model: torch.nn.Module,
+             optimizer: torch.optim.Optimizer = None,
+             meta: Hashable = None):
         torch.save({'model': model,
                     'state_dict': model.state_dict(),
                     'optimizer': optimizer,
                     'optimizer_state': optimizer.state_dict() if optimizer else None,
-                    'meta': meta}, fname)
+                    'meta': meta},
+                   str(fname))
 
 
 class ProgressManager:

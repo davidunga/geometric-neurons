@@ -4,10 +4,10 @@ from abc import ABC, abstractmethod
 
 class Embedder(ABC, torch.nn.Module):
 
-    def __init__(self, input_size: int, output_size: int, *args, **kwargs):
+    def __init__(self, input_size: int, dim: int, *args, **kwargs):
         super().__init__()
         self.input_size = input_size
-        self.output_size = output_size
+        self.dim = dim
 
     @abstractmethod
     def forward(self, x):
@@ -16,12 +16,14 @@ class Embedder(ABC, torch.nn.Module):
 
 class LinearEmbedder(Embedder):
 
-    def __init__(self, input_size: int, output_size: int, dropout: float):
-        super().__init__(input_size, output_size)
+    def __init__(self, input_size: int, dim: int, dropout: float):
+        super().__init__(input_size, dim)
         torch.manual_seed(0)
         self.embedder = torch.nn.Sequential(
             torch.nn.Dropout(p=dropout),
-            torch.nn.Linear(self.input_size, self.output_size))
+            torch.nn.Linear(self.input_size, self.dim))
 
     def forward(self, x):
         return self.embedder(x)
+
+

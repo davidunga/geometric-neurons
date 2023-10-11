@@ -1,5 +1,5 @@
 import numpy as np
-from common.type_utils import *
+from common.utils.typings import *
 
 
 def random_planar_mtx(seed: int = 0,

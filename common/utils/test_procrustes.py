@@ -1,9 +1,8 @@
 import unittest
-import numpy as np
 import numpy.testing
-from analysis.procrustes import Procrustes
-from common.testing_utils import shapesbank, random_planar_mtx
-from common.linalg import planar
+from common.utils.procrustes import Procrustes
+from common.utils.testing_tools import shapesbank, random_planar_mtx
+from common.utils.linalg import planar
 
 
 class TestProcrustes(unittest.TestCase):
