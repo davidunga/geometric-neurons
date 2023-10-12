@@ -203,6 +203,6 @@ class SamenessEval:
         return {"auc": self.auc,
                 "tscore": self.tscore,
                 "loss": self.loss,
-                "ttest.statistic": self.ttest.statistic,
-                "ttest.pvalue": self.ttest.pvalue,
-                "ttest.confidence_interval": self.ttest.confidence_interval}
+                "ttest-t": self.ttest.statistic,
+                "ttest-p": self.ttest.pvalue,
+                "ttest-ci": self.ttest.confidence_interval()}

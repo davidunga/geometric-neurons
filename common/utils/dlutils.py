@@ -31,10 +31,25 @@ class checkpoint:
         return torch.load(str(fname))['meta']
 
     @staticmethod
+    def update_meta(fname, m: dict, mode='append'):
+        model, optimizer, meta = checkpoint.load(fname)
+        if mode in 'append':
+            assert isinstance(meta, dict)
+            for k, v in m.items():
+                assert k not in meta
+                meta[k] = v
+        elif mode == 'replace':
+            meta = m
+        else:
+            raise ValueError()
+        checkpoint.dump(fname, model, optimizer, meta)
+        return meta
+
+    @staticmethod
     def dump(fname: str | Path,
              model: torch.nn.Module,
              optimizer: torch.optim.Optimizer = None,
-             meta: Hashable = None):
+             meta: dict = None):
         torch.save({'model': model,
                     'state_dict': model.state_dict(),
                     'optimizer': optimizer,
@@ -53,9 +68,12 @@ class ProgressManager:
         value: float = .0
         count: int = 0
         _last_val_loss: float = None
+        _last_train_loss: float = None
 
         def update(self, val_loss: float, train_loss: float) -> None:
-            self.value = self.fn(val_loss, train_loss, self._last_val_loss)
+            self.value = self.fn(val_loss, train_loss, self._last_val_loss, self._last_train_loss)
+            self._last_val_loss = val_loss
+            self._last_train_loss = train_loss
             if (self.value > self.thresh) == self.check_above:
                 self.count += 1
             else:
@@ -66,7 +84,7 @@ class ProgressManager:
         Args:
             patience: number of steps to wait before stopping, once a threshold values is met. None = never.
             converge: convergence threshold
-                convergence = (last_val_loss - current_val_loss) / last_val_loss
+                convergence = (last_val_loss - val_loss) / last_val_loss
             overfit: overfit threshold
                 overfit = (val_loss - train_loss) / train_loss
         """
@@ -77,10 +95,10 @@ class ProgressManager:
         self._stop_reason = ''
         self._is_new_nest = False
 
-        def _converge(val_loss, train_loss, last_val_loss) -> float:
-            return 1. - (0 if last_val_loss is None else val_loss / last_val_loss)
+        def _converge(val_loss, train_loss, last_val_loss, last_train_loss) -> float:
+            return 1. if last_val_loss is None else (last_val_loss - val_loss) / last_val_loss
 
-        def _overfit(val_loss, train_loss, last_val_loss) -> float:
+        def _overfit(val_loss, train_loss, last_val_loss, last_train_loss) -> float:
             return val_loss / max(train_loss, 1e-9) - 1
 
         self.criteria: dict[str, ProgressManager.StopCriterion] = {

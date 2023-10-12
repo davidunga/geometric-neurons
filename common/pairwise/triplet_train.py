@@ -18,7 +18,8 @@ def triplet_train(
         loss_margin: float = 1.,
         device: str = 'cpu',
         model_dump_file: Path = None,
-        tensorboard_dir: Path = None
+        tensorboard_dir: Path = None,
+        progress_mgr_params: dict = None,
     ):
 
     if model_dump_file is not None:
@@ -47,15 +48,22 @@ def triplet_train(
     optimizer = dlutils.get_optimizer(model.parameters(), optim_params)
     triplet_loss = torch.nn.TripletMarginLoss(margin=loss_margin)
 
-    progress_mgr = dlutils.ProgressManager(patience=None, overfit=0.2, converge=0.001)
+    if progress_mgr_params is None:
+        progress_mgr = dlutils.ProgressManager(patience=None)
+    else:
+        if progress_mgr_params['patience'] < 1:
+            progress_mgr_params['patience'] = int(.5 + progress_mgr_params['patience'] * epochs)
+        progress_mgr = dlutils.ProgressManager(**progress_mgr_params)
+
     tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
     batcher = dlutils.BatchManager(batch_size=batch_size, items=list(train_sameness.triplet_participating_items))
 
-    def _add_to_tensborboard(eval_result: SamenessEval, name: str):
-        if tb is not None:
-            tb.add_scalars(f'{name}/Loss', {'loss': eval_result.loss}, epoch)
-            tb.add_scalars(f'{name}/TScore', {'tscore': eval_result.tscore}, epoch)
-            tb.add_scalars(f'{name}/AUC', {'auc': eval_result.auc}, epoch)
+    def _add_to_tensborboard(eval_results: dict[str, SamenessEval]):
+        if tb is None:
+            return
+        for metric in ('loss', 'auc', 'tscore'):
+            tb.add_scalars(metric.capitalize(), {name: getattr(eval_res, metric)
+                                                 for name, eval_res in eval_results.items()}, epoch)
 
     for epoch in range(epochs):
         epoch_start_t = time()
@@ -74,14 +82,15 @@ def triplet_train(
         print('[{:3d}] ({:2.1f}s) '.format(epoch, time() - epoch_start_t), end='')
         print(f'Train: {train_eval} Val: {val_eval}', end='')
 
-        _add_to_tensborboard(train_eval, 'Train')
-        _add_to_tensborboard(val_eval, 'Val')
+        _add_to_tensborboard(dict(train=train_eval, val=val_eval))
 
         progress_mgr.process(val_eval.loss, train_eval.loss, val_eval.auc)
         print(' ' + progress_mgr.report(), end='')
 
         if progress_mgr.is_new_best and model_dump_file is not None:
-            dlutils.checkpoint.dump(model_dump_file, model, optimizer, meta={'epoch': epoch, **val_eval.results_dict()})
+            dlutils.checkpoint.dump(model_dump_file, model, optimizer,
+                                    meta={'epoch': epoch, 'val': val_eval.results_dict()})
+
             print(' [Saved]', end='')
 
         print('')

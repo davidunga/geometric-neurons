@@ -10,9 +10,9 @@ import paths
 import yaml
 from munch import munchify, Munch
 from hashlib import sha1
+from common.utils import dictools
 
-
-_default_config_dict = yaml.safe_load((paths.CONFIG_DIR / 'default_config.yml').open())
+_configs_grid = yaml.safe_load((paths.CONFIG_DIR / 'config.yml').open())
 
 
 @dataclass(init=False)
@@ -21,12 +21,17 @@ class Config:
     def __init__(self, cfg: dict):
         cfg = munchify(cfg)
         self.data = DataConfig(cfg.data)
-        self.model_selection = ModelSelectionConfig(cfg.model_selection)
-        self.embedding = EmbeddingConfig(cfg.embedding)
+        self.model = ModelConfig(cfg.model)
+        self.training = TrainingConfig(cfg.training)
 
     @classmethod
     def from_default(cls):
-        return cls(deepcopy(_default_config_dict))
+        return cls(next(dictools.dict_product_from_grid(_configs_grid)))
+
+    @classmethod
+    def yield_from_grid(cls):
+        for cfg_dict in dictools.dict_product_from_grid(_configs_grid):
+            yield cls(cfg_dict)
 
     def str(self):
         hash_str_sz = 6
@@ -35,8 +40,11 @@ class Config:
 
     def __dict__(self) -> dict:
         return {"data": self.data.__dict__,
-                "model_selection": self.model_selection.__dict__,
-                "embedding": self.embedding.__dict__}
+                "model": self.model.__dict__,
+                "training": self.training.__dict__}
+
+    def jsons(self) -> str:
+        return json.dumps(self.__dict__())
 
 
 class DataConfig(Munch):
@@ -62,12 +70,9 @@ class DataConfig(Munch):
         return s
 
 
-class ModelSelectionConfig(Munch):
+class ModelConfig(Munch):
     pass
 
 
-class EmbeddingConfig(Munch):
+class TrainingConfig(Munch):
     pass
-
-
-

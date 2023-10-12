@@ -6,3 +6,5 @@
 *.pkl
 
 outputs/models/
+
+outputs/cv/
