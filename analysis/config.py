@@ -58,7 +58,9 @@ class DataConfig(Munch):
         super().__init__(*args, **kwargs)
         assert DataConfig.BASE in self
 
-    def str(self, level: Level):
+    def str(self, level: Level = None):
+        if level is None:
+            level = DataConfig.PAIRING
         s = f"{self.base.name} bin{round(1000 * self.base.bin_sz):d} lag{round(1000 * self.base.lag):d}"
         if level == DataConfig.BASE:
             return s

@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 from analysis.config import Config
 from geometric_encoding.embedding import LinearEmbedder
 from analysis.data_manager import DataMgr
@@ -22,7 +21,7 @@ def cv_train():
     for cfg in Config.yield_from_grid():
 
         data_mgr = DataMgr(cfg.data)
-        sameness_data, pairs, segments = data_mgr.load_sameness()
+        sameness_data, _, _ = data_mgr.load_sameness()
         model = LinearEmbedder(input_size=sameness_data.X.shape[1], **cfg.model)
 
         n_train_items = int((len(sameness_data) / cfg.training.cv.folds) ** .5)

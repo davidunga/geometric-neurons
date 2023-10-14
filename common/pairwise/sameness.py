@@ -11,6 +11,7 @@ from scipy import stats
 from copy import deepcopy
 from common.utils.devtools import verbolize
 
+
 class SamenessData(symmetric_pairs.SymmetricPairsData):
 
     _SAME = 'same'

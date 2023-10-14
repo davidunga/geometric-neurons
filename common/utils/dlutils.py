@@ -138,22 +138,23 @@ class ProgressManager:
                 self._stop_reason = criterion
 
         if self._best_val_score is None or val_score > self._best_val_score:
-            self._is_new_nest = self._best_val_score is not None
+            self._is_new_nest = True
             self._stop_reason = ''
             self._best_val_score = val_score
 
 
 class BatchManager:
 
-    def __init__(self, items: int | Sequence, batch_size: int = 64, shuffle: bool = True):
+    def __init__(self, items: int | Sequence,
+                 batch_size: int = 64,
+                 batches_in_epoch: int = None,
+                 shuffle: bool = True):
+
         self._items = np.arange(items) if isinstance(items, int) else items
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.epoch_items = self._items
-
-    @property
-    def batches_in_epoch(self) -> int:
-        return len(self._items) // self.batch_size
+        self.batches_in_epoch = len(self._items) // self.batch_size if batches_in_epoch is None else batches_in_epoch
 
     def init_epoch(self, epoch: int | None = None) -> None:
         if self.shuffle:
@@ -166,6 +167,9 @@ class BatchManager:
         assert 0 <= batch < self.batches_in_epoch, "Batch out of range"
         start = batch * self.batch_size
         stop = start + self.batch_size
+        if stop > len(self.epoch_items):
+            start = 0
+            stop = self.batch_size
         return self.epoch_items[start: stop]
 
 

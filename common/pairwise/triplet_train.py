@@ -5,7 +5,7 @@ from pathlib import Path
 from common.utils import dlutils
 from tqdm import tqdm
 from common.pairwise.sameness import SamenessData, SamenessEval
-from common.utils.devtools import printer
+from common.utils.devtools import printer, progbar
 
 
 def triplet_train(
@@ -14,6 +14,7 @@ def triplet_train(
         model: torch.nn.Module,
         batch_size: int = 64,
         epochs: int = 100,
+        epoch_size_factor: float = 1.,
         optim_params: str | dict = 'Adam',
         loss_margin: float = 1.,
         device: str = 'cpu',
@@ -56,7 +57,11 @@ def triplet_train(
         progress_mgr = dlutils.ProgressManager(**progress_mgr_params)
 
     tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
-    batcher = dlutils.BatchManager(batch_size=batch_size, items=list(train_sameness.triplet_participating_items))
+
+    n_pairs_ballpark = train_sameness.triplet_participating_n * (train_sameness.triplet_participating_n - 1) // 2
+    batches_in_epoch = int(epoch_size_factor * n_pairs_ballpark / batch_size)
+    batcher = dlutils.BatchManager(batch_size=batch_size, items=list(train_sameness.triplet_participating_items),
+                                   batches_in_epoch=batches_in_epoch)
 
     def _add_to_tensborboard(eval_results: dict[str, SamenessEval]):
         if tb is None:
@@ -68,7 +73,7 @@ def triplet_train(
     for epoch in range(epochs):
         epoch_start_t = time()
         batcher.init_epoch(epoch)
-        for batch in tqdm(range(batcher.batches_in_epoch), desc=f'[{epoch}]', leave=False):
+        for batch in progbar(batcher.batches_in_epoch, span=20, prefix=f'[{epoch:3d}]', leave='prefix'):
             optimizer.zero_grad()
             anchors = batcher.get_items(batch)
             A, P, N = train_sameness.sample_triplets(anchors, rand_seed=batch)
@@ -79,9 +84,7 @@ def triplet_train(
         train_eval.evaluate(embedder=model)
         val_eval.evaluate(embedder=model)
 
-        print('[{:3d}] ({:2.1f}s) '.format(epoch, time() - epoch_start_t), end='')
-        print(f'Train: {train_eval} Val: {val_eval}', end='')
-
+        print(f' ({time() - epoch_start_t:2.1f}s) Train: {train_eval} Val: {val_eval}', end='')
         _add_to_tensborboard(dict(train=train_eval, val=val_eval))
 
         progress_mgr.process(val_eval.loss, train_eval.loss, val_eval.auc)

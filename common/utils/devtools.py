@@ -4,8 +4,130 @@ import numpy as np
 import inspect
 from dataclasses import dataclass
 from collections import defaultdict
+from common.utils.typings import *
 import logging
 import functools
+#import time
+
+
+class progbar:
+
+    _full_element = u"\u2588"
+    _half_element = u"\u258c"
+    _dot_element = u"\u00B7"
+    _empty_element = " "
+
+    def __init__(self, x: int | Iterable, n: int = None, prefix: str = "", suffix: str = "",
+                 span: int = 10, enum: bool = False, leave: str = "none"):
+
+        """
+        progress bar.
+        Args:
+            x: iterable, or range span (int)
+            n: number of iterations. default = len(x) if x is sized
+            prefix: prefix string
+            suffix: suffix string
+            span: length of bar, in chars
+            enum: add enumeration
+            leave: "all", "none", or comma-separated string of fields to leave after completion,
+                e.g., "prefix,bar"
+        """
+
+        if isinstance(x, int):
+            self.n = x
+            x = range(x)
+        if n is None and isinstance(x, Sized):
+            self.n = len(x)
+
+        self.x = x
+        self.prefix = prefix
+        self.suffix = suffix
+        self.span = span
+        self.enum = enum
+        self.leave = leave
+        self.s = ""
+        self._is_sized = self.n is not None
+        self._t_start = None
+        pass
+
+    def update_field(self, name: str, value: str):
+        """ update field for current iteration. e.g., update_field('suffix', 'my suffix')  """
+        items = self._items
+        items[name] = value
+        self._update(items)
+
+    def clear(self):
+        print("\b" * len(self.s), end="")
+
+    def __iter__(self):
+
+        if self._t_start is None:
+            self._t_start = time()
+
+        items = {}
+
+        for count, xx in enumerate(self.x, start=1):
+
+            items['prefix'] = self.prefix
+            items['bar'] = self._make_bar(count)
+            items['count'] = self._make_count(count)
+            if self._is_sized:
+                items['percent'] = f"{int(round(100 * count / self.n)):3d}%"
+            items['time'] = self._make_time(count)
+            items['suffix'] = self.suffix
+
+            if count == 1:
+                self._filter_leave_items(items)  # dryrun to detect problems at the start
+            elif count == self.n:
+                items = self._filter_leave_items(items)
+
+            self._update(items)
+
+            if self.enum:
+                yield count - 1, xx
+            else:
+                yield xx
+
+            if count == self.n:
+                break
+
+    def _make_bar(self, count: int) -> str:
+        if self._is_sized:
+            p = count / self.n
+            b = int(p * self.span) * [self._full_element]
+            b += (round(p * self.span) - int(p * self.span)) * [self._half_element]
+            b += (self.span - len(b)) * [self._empty_element]
+        else:
+            b = [self._dot_element] * self.span
+            b[count % self.span] = self._full_element
+        return "".join(b)
+
+    def _make_time(self, count: int) -> str:
+        t_elapsed = time() - self._t_start
+        t_avg = t_elapsed / count
+        remain_str = f"<{t_avg * (self.n - count):2.3f}s" if self._is_sized else ""
+        return f"{t_elapsed:2.3f}s{remain_str},{t_avg:2.3f}s"
+
+    def _make_count(self, count: int) -> str:
+        n_digits = len(str(self.n)) if self._is_sized else 6
+        return f"{count:{n_digits}}" + (f"/{self.n}" if self._is_sized else "")
+
+    def _update(self, items):
+        self._items = items
+        self.clear()
+        self.s = "|".join([v for v in items.values() if len(v)]) + ("|" if len(items) > 1 else "")
+        print(self.s, end="")
+
+    def _filter_leave_items(self, items):
+        if self.leave == "none":
+            leave_items = []
+        elif self.leave == "all":
+            leave_items = list(items.keys())
+        else:
+            leave_items = self.leave.split(",")
+        if len(set(leave_items).difference(items.keys())):
+            raise ValueError(f"Unknown items to leave: {set(leave_items).difference(items.keys())}")
+        return {k: v for k, v in items.items() if k in leave_items}
 
 
 class Verbolize:
@@ -100,3 +222,15 @@ class TicToc:
 
         for name, times in line_times.items():
             print(f"{name} mean= {np.mean(times):2.4}s, count={len(times)}, total= {np.sum(times):2.4}s")
+
+
+
+if __name__ == "__main__":
+    def g() -> Generator:
+        for _ in range(10_000):
+            yield time()
+    from time import sleep
+    z = np.arange(10)
+    pbar = progbar(z, leave="prefix,bar", prefix="ff ")
+    for i in pbar:
+        sleep(1)

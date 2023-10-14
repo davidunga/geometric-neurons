@@ -31,8 +31,6 @@ def num_items(num_pairs: int) -> int:
     assert n.is_integer()
     return int(n)
 
-from common.utils.devtools import verbolize
-
 
 class SymmetricPairsData:
     """
