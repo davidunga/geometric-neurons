@@ -12,11 +12,6 @@ import functools
 
 class progbar:
 
-    _full_element = u"\u2588"
-    _half_element = u"\u258c"
-    _dot_element = u"\u00B7"
-    _empty_element = " "
-
     def __init__(self, x: int | Iterable, n: int = None, prefix: str = "", suffix: str = "",
                  span: int = 10, enum: bool = False, leave: str = "none"):
 
@@ -24,110 +19,115 @@ class progbar:
         progress bar.
         Args:
             x: iterable, or range span (int)
-            n: number of iterations. default = len(x) if x is sized
+            n: number of iterations, default = len(x) if x is sized
             prefix: prefix string
             suffix: suffix string
-            span: length of bar, in chars
-            enum: add enumeration
-            leave: "all", "none", or comma-separated string of fields to leave after completion,
-                e.g., "prefix,bar"
+            span: length of bar, in chars. default = 10
+            enum: flag - add enumeration
+            leave: fields to leave after completion. either comma-separated string, "all", or "none".
+                e.g., "prefix,bar,suffix"
         """
 
-        if isinstance(x, int):
-            self.n = x
-            x = range(x)
-        if n is None and isinstance(x, Sized):
-            self.n = len(x)
-
-        self.x = x
+        self.x = range(x) if isinstance(x, int) else x
+        self.n = len(self.x) if n is None and hasattr(self.x, '__len__') else n
         self.prefix = prefix
         self.suffix = suffix
         self.span = span
         self.enum = enum
+        self.count = 0
         self.leave = leave
         self.s = ""
         self._is_sized = self.n is not None
         self._t_start = None
         pass
 
-    def update_field(self, name: str, value: str):
-        """ update field for current iteration. e.g., update_field('suffix', 'my suffix')  """
-        items = self._items
-        items[name] = value
-        self._update(items)
+    def update(self, **kwargs):
+        """
+        re-print based on current state, optional override fields.
+        e.g.,
+            update() - re-print based on state and specifications
+            update(prefix='myPrefix', suffix='mySuffix') - override prefix and suffix
+        """
+
+        if self._t_start is None:
+            self._t_start = time()
+
+        elements = {}
+        elements['prefix'] = self.prefix
+        elements['bar'] = self._make_bar()
+        elements['count'] = self._make_count()
+        elements['percent'] = self._make_percent()
+        elements['time'] = self._make_time()
+        elements['suffix'] = self.suffix
+
+        for k in kwargs:
+            assert k in elements, f"Unknown field {k}"
+            elements[k] = kwargs[k]
+
+        if self.count == 1:
+            self._filter_leave_elements(elements)  # dryrun to detect problems at the start
+        elif self.count == self.n:
+            elements = self._filter_leave_elements(elements)
+
+        self.clear()
+        sp = "|"
+        self.s = sp.join([v for v in elements.values() if len(v)]) + (sp if len(elements) > 1 else "")
+        print(self.s, end="")
 
     def clear(self):
         print("\b" * len(self.s), end="")
 
     def __iter__(self):
-
-        if self._t_start is None:
-            self._t_start = time()
-
-        items = {}
-
-        for count, xx in enumerate(self.x, start=1):
-
-            items['prefix'] = self.prefix
-            items['bar'] = self._make_bar(count)
-            items['count'] = self._make_count(count)
-            if self._is_sized:
-                items['percent'] = f"{int(round(100 * count / self.n)):3d}%"
-            items['time'] = self._make_time(count)
-            items['suffix'] = self.suffix
-
-            if count == 1:
-                self._filter_leave_items(items)  # dryrun to detect problems at the start
-            elif count == self.n:
-                items = self._filter_leave_items(items)
-
-            self._update(items)
-
+        for self.count, xx in enumerate(self.x, start=1):
+            self.update()
             if self.enum:
-                yield count - 1, xx
+                yield self.count - 1, xx
             else:
                 yield xx
-
-            if count == self.n:
+            if self.count == self.n:
                 break
 
-    def _make_bar(self, count: int) -> str:
+    def _make_bar(self) -> str:
+        _full_element = u"\u2588"
+        _part_elements = [u'\u258F', u'\u258E', u'\u258D', u'\u258C',
+                          u'\u258B', u'\u258A', u'\u2589']
+        _dot_element = u"\u00B7"
         if self._is_sized:
-            p = count / self.n
-            b = int(p * self.span) * [self._full_element]
-            b += (round(p * self.span) - int(p * self.span)) * [self._half_element]
-            b += (self.span - len(b)) * [self._empty_element]
+            p = self.count / self.n
+            b = int(p * self.span) * [_full_element]
+            part_ix = int(((p * self.span) - int(p * self.span)) * 8)
+            if part_ix > 0:
+                b += _part_elements[part_ix - 1]
+            b += (self.span - len(b)) * [" "]
         else:
-            b = [self._dot_element] * self.span
-            b[count % self.span] = self._full_element
+            b = [_dot_element] * self.span
+            b[self.count % self.span] = _full_element
         return "".join(b)
 
-    def _make_time(self, count: int) -> str:
+    def _make_time(self) -> str:
         t_elapsed = time() - self._t_start
-        t_avg = t_elapsed / count
-        remain_str = f"<{t_avg * (self.n - count):2.3f}s" if self._is_sized else ""
+        t_avg = t_elapsed / self.count
+        remain_str = f"<{t_avg * (self.n - self.count):2.3f}s" if self._is_sized else ""
         return f"{t_elapsed:2.3f}s{remain_str},{t_avg:2.3f}s"
 
-    def _make_count(self, count: int) -> str:
+    def _make_count(self) -> str:
         n_digits = len(str(self.n)) if self._is_sized else 6
-        return f"{count:{n_digits}}" + (f"/{self.n}" if self._is_sized else "")
+        return f"{self.count:{n_digits}}" + (f"/{self.n}" if self._is_sized else "")
 
-    def _update(self, items):
-        self._items = items
-        self.clear()
-        self.s = "|".join([v for v in items.values() if len(v)]) + ("|" if len(items) > 1 else "")
-        print(self.s, end="")
+    def _make_percent(self) -> str:
+        return f"{int(round(100 * self.count / self.n)):3d}%" if self._is_sized else ""
 
-    def _filter_leave_items(self, items):
+    def _filter_leave_elements(self, elements):
         if self.leave == "none":
-            leave_items = []
+            leave_fields = set()
         elif self.leave == "all":
-            leave_items = list(items.keys())
+            leave_fields = set(elements.keys())
         else:
-            leave_items = self.leave.split(",")
-        if len(set(leave_items).difference(items.keys())):
-            raise ValueError(f"Unknown items to leave: {set(leave_items).difference(items.keys())}")
-        return {k: v for k, v in items.items() if k in leave_items}
+            leave_fields = set(fld.strip() for fld in self.leave.split(","))
+        unknowns = leave_fields.difference(elements.keys())
+        if len(unknowns):
+            raise ValueError(f"Unknown fields to leave: {unknowns}")
+        return {k: v for k, v in elements.items() if k in leave_fields}
 
 
 class Verbolize:
@@ -230,7 +230,9 @@ if __name__ == "__main__":
         for _ in range(10_000):
             yield time()
     from time import sleep
-    z = np.arange(10)
-    pbar = progbar(z, leave="prefix,bar", prefix="ff ")
-    for i in pbar:
-        sleep(1)
+    z = np.arange(10) + 500
+    pbar = progbar(z, leave="all", enum=True)
+    for i, zz in pbar:
+        pbar.update(prefix=str(i), suffix=str(zz))
+        sleep(np.random.random())
+
