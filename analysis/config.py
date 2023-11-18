@@ -10,7 +10,7 @@ import paths
 import yaml
 from munch import munchify, Munch
 from hashlib import sha1
-from common.utils import dictools
+from common.utils import dictools, hashtools
 
 _configs_grid = yaml.safe_load((paths.CONFIG_DIR / 'config.yml').open())
 
@@ -33,18 +33,24 @@ class Config:
         for cfg_dict in dictools.dict_product_from_grid(_configs_grid):
             yield cls(cfg_dict)
 
-    def str(self):
-        hash_str_sz = 6
-        hash_str = sha1(str(self.__dict__()).encode('utf-8')).hexdigest()[:hash_str_sz]
-        return self.data.str(DataConfig.PAIRING) + " " + hash_str
+    def str(self) -> str:
+        hash_size = 6
+        return self.data.str(DataConfig.PAIRING) + " " + hashtools.calc_hash(self, fmt='hex')[:hash_size]
 
+    def __str__(self):
+        return self.str()
+
+    def __hash__(self) -> int:
+        return hashtools.calc_hash(self, fmt='int')
+
+    @property
     def __dict__(self) -> dict:
         return {"data": self.data.__dict__,
                 "model": self.model.__dict__,
                 "training": self.training.__dict__}
 
     def jsons(self) -> str:
-        return json.dumps(self.__dict__())
+        return json.dumps(self.__dict__)
 
 
 class DataConfig(Munch):

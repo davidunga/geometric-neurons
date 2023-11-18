@@ -2,10 +2,10 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from time import time
 from pathlib import Path
+import shutil
 from common.utils import dlutils
-from tqdm import tqdm
 from common.pairwise.sameness import SamenessData, SamenessEval
-from common.utils.devtools import printer, progbar
+from common.utils.devtools import progbar
 
 
 def triplet_train(
@@ -15,7 +15,7 @@ def triplet_train(
         batch_size: int = 64,
         epochs: int = 100,
         epoch_size_factor: float = 1.,
-        optim_params: str | dict = 'Adam',
+        optim_params: dict | str = 'Adam',
         loss_margin: float = 1.,
         device: str = 'cpu',
         model_dump_file: Path = None,
@@ -23,9 +23,18 @@ def triplet_train(
         progress_mgr_params: dict = None,
     ):
 
-    if model_dump_file is not None:
+    _DBG_RUN = False
+
+    if isinstance(optim_params, str):
+        optim_params = {'kind': optim_params}
+
+    if model_dump_file:
         model_dump_file.parent.mkdir(parents=True, exist_ok=True)
+        model_temp_file = Path(model_dump_file.as_posix() + ".training")
+
     if tensorboard_dir is not None:
+        if tensorboard_dir.is_dir():
+            shutil.rmtree(tensorboard_dir.as_posix())
         tensorboard_dir.mkdir(parents=True, exist_ok=False)
 
     model.to(device=device, dtype=torch.float32)
@@ -34,32 +43,28 @@ def triplet_train(
 
     model.train()
 
-    printer.dbg("initializing triplet sampling: train")
     train_sameness.init_triplet_sampling()
-    printer.dbg("initializing train eval:")
     train_eval = SamenessEval(sameness=train_sameness)
 
-    printer.dbg("initializing triplet sampling: validation")
     val_sameness.init_triplet_sampling()
-    printer.dbg("initializing val eval:")
     val_eval = SamenessEval(sameness=val_sameness)
 
-    printer.dbg("starting training")
-
-    optimizer = dlutils.get_optimizer(model.parameters(), optim_params)
+    optimizer = dlutils.get_optimizer(model.parameters(), **optim_params)
     triplet_loss = torch.nn.TripletMarginLoss(margin=loss_margin)
 
-    if progress_mgr_params is None:
-        progress_mgr = dlutils.ProgressManager(patience=None)
+    if progress_mgr_params:
+        progress_mgr = dlutils.ProgressManager(**progress_mgr_params, epochs=epochs)
     else:
-        if progress_mgr_params['patience'] < 1:
-            progress_mgr_params['patience'] = int(.5 + progress_mgr_params['patience'] * epochs)
-        progress_mgr = dlutils.ProgressManager(**progress_mgr_params)
+        progress_mgr = dlutils.ProgressManager(patience=None, epochs=epochs)
 
     tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
 
     n_pairs_ballpark = train_sameness.triplet_participating_n * (train_sameness.triplet_participating_n - 1) // 2
     batches_in_epoch = int(epoch_size_factor * n_pairs_ballpark / batch_size)
+    if _DBG_RUN:
+        print(" !!! DEBUG RUN !!! ")
+        epochs = 3
+        batches_in_epoch = 5
     batcher = dlutils.BatchManager(batch_size=batch_size, items=list(train_sameness.triplet_participating_items),
                                    batches_in_epoch=batches_in_epoch)
 
@@ -87,21 +92,23 @@ def triplet_train(
         print(f' ({time() - epoch_start_t:2.1f}s) Train: {train_eval} Val: {val_eval}', end='')
         _add_to_tensborboard(dict(train=train_eval, val=val_eval))
 
-        progress_mgr.process(val_eval.loss, train_eval.loss, val_eval.auc)
+        progress_mgr.process(val_eval.loss, train_eval.loss, val_eval.auc, epoch=epoch)
         print(' ' + progress_mgr.report(), end='')
 
-        if progress_mgr.is_new_best and model_dump_file is not None:
-            dlutils.checkpoint.dump(model_dump_file, model, optimizer,
-                                    meta={'epoch': epoch, 'val': val_eval.results_dict()})
+        if progress_mgr.is_new_best and model_dump_file:
+            dlutils.checkpoint.dump(model_temp_file, model, optimizer, meta={
+                'epoch': epoch, 'train_status': progress_mgr.status_dict, 'val': val_eval.results_dict()})
 
             print(' [Saved]', end='')
 
         print('')
 
         if progress_mgr.should_stop:
-            print("Early stopping due to " + progress_mgr.stop_reason)
+            print("Stopping due to " + progress_mgr.stop_reason)
             break
 
-    return model
+    if model_dump_file:
+        model_temp_file.rename(model_dump_file)
+        dlutils.checkpoint.update_meta(model_dump_file, train_status=progress_mgr.status_dict)
 
 

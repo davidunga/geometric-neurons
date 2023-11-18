@@ -21,11 +21,24 @@ def dict_product_from_grid(d: dict, grid_suffix: str = '__grid'):
         yield unflatten_dict(d)
 
 
-def mod_copy_dict(base_dict: dict, mod_dict: dict = None):
-    """ get a modified deep-copy of base_dict """
-    ret = deepcopy(base_dict)
-    if mod_dict is not None:
-        ret.update(mod_dict)
+def modify_dict(base_dict: dict, copy: bool, exclude: list = None,
+                include: list = None, update_dict: dict = None):
+
+    keys = base_dict.keys()
+    if include is not None:
+        keys = [k for k in keys if k in include]
+    if exclude is not None:
+        keys = [k for k in keys if k not in exclude]
+    if update_dict:
+        if not isinstance(keys, list):
+            keys = list(keys)
+        keys += [k for k in update_dict.keys() if k not in keys]
+    else:
+        update_dict = {}
+
+    ret = {k: update_dict[k] if k in update_dict else base_dict[k] for k in keys}
+    if copy:
+        ret = deepcopy(ret)
     return ret
 
 
@@ -35,18 +48,14 @@ def dict_product(d):
         yield dict(zip(keys, vals))
 
 
-def dict_exclude(d: dict, keys):
-    keys = {[keys]} if not isinstance(keys, list) else set(keys)
-    return {k: v for k, v in d.items() if k not in keys}
-
-
-def update_nested_dict_(d, keys, val, allow_new=False):
+def update_nested_dict_(d: dict, keys: list, val, allow_new: bool = False):
     """
-    Performs: d[keys[0]][keys[1]][..] = val
-    :param d: A nested dictionary
-    :param keys: List of keys, where keys[i] is a key in the i-th level of the dictionary
-    :param val: Value to set
-    :param allow_new: allow creating new keys?
+    Performs d[keys[0]][keys[1]][..] = val
+    Args:
+        d: Dictionary
+        keys: List of nested keys
+        val: Value to assign
+        allow_new: Allow creating new keys?
     """
     for k in keys[:-1]:
         if allow_new and (k not in d):

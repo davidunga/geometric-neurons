@@ -1,5 +1,6 @@
 from numpy.typing import NDArray, ArrayLike
-from typing import Any, Sequence, Generator, Iterator, Optional, Container, Iterable, Collection, Sized
+from typing import Any, Sequence, Generator, Iterator, Optional, Container, Iterable, Collection, Sized, Callable
+from pathlib import Path
 
 NpVec = NDArray
 NpMatrix = NDArray
@@ -11,3 +12,5 @@ NpPair = NDArray
 NpPairs = NDArray
 
 Vec = list | NpVec
+
+PathLike = Path | str

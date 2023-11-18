@@ -1,23 +1,20 @@
 """ Deep-learning utilities """
 
 import torch
-from typing import Hashable, Callable, Sequence
+from common.utils.typings import *
 from dataclasses import dataclass
 import numpy as np
-from pathlib import Path
 
 
-def get_optimizer(model_params, optim_params: str | dict):
-    if isinstance(optim_params, str): optim_params = {'kind': optim_params}
-    return getattr(torch.optim, optim_params['kind'])(
-        model_params, **{k: v for k, v in optim_params.items() if k != 'kind'})
+def get_optimizer(model_params, kind: str = 'Adam', **optim_kws):
+    return getattr(torch.optim, kind)(model_params, **optim_kws)
 
 
 class checkpoint:
 
     @staticmethod
-    def load(fname: str | Path):
-        items = torch.load(str(fname))
+    def load(model_file: PathLike):
+        items = checkpoint._safe_load_items(model_file)
         model = items['model']
         model.load_state_dict(items['state_dict'])
         optimizer = items['optimizer']
@@ -27,35 +24,54 @@ class checkpoint:
         return model, optimizer, meta
 
     @staticmethod
-    def get_meta(fname: str | Path):
-        return torch.load(str(fname))['meta']
+    def get_meta(model_file: PathLike):
+        return checkpoint._safe_load_items(model_file)['meta']
 
     @staticmethod
-    def update_meta(fname, m: dict, mode='append'):
-        model, optimizer, meta = checkpoint.load(fname)
-        if mode in 'append':
-            assert isinstance(meta, dict)
-            for k, v in m.items():
-                assert k not in meta
-                meta[k] = v
-        elif mode == 'replace':
-            meta = m
-        else:
-            raise ValueError()
-        checkpoint.dump(fname, model, optimizer, meta)
-        return meta
+    def set_meta(model_file: PathLike, meta):
+        items = checkpoint._safe_load_items(model_file)
+        items['meta'] = meta
+        checkpoint._safe_save_items(model_file, items)
 
     @staticmethod
-    def dump(fname: str | Path,
-             model: torch.nn.Module,
-             optimizer: torch.optim.Optimizer = None,
-             meta: dict = None):
-        torch.save({'model': model,
-                    'state_dict': model.state_dict(),
-                    'optimizer': optimizer,
-                    'optimizer_state': optimizer.state_dict() if optimizer else None,
-                    'meta': meta},
-                   str(fname))
+    def update_meta(model_file: PathLike, **kwargs) -> dict:
+        items = checkpoint._safe_load_items(model_file)
+        items['meta'].update(kwargs)
+        checkpoint._safe_save_items(model_file, items)
+        return items
+
+    @staticmethod
+    def dump(model_file: PathLike, model: torch.nn.Module,
+             optimizer: torch.optim.Optimizer = None, meta: dict = None):
+        items = {'model': model,
+                 'state_dict': model.state_dict(),
+                 'optimizer': optimizer,
+                 'optimizer_state': optimizer.state_dict() if optimizer else None,
+                 'meta': meta}
+        checkpoint._safe_save_items(model_file, items)
+
+    @staticmethod
+    def _validate_items(items: dict):
+        assert set(items.keys()) == {'model', 'state_dict', 'optimizer', 'optimizer_state', 'meta'}
+        assert isinstance(items['model'], torch.nn.Module)
+        assert isinstance(items['state_dict'], dict)
+        assert (items['optimizer'] is None) == (items['optimizer_state'] is None)
+        assert items['optimizer'] is None or isinstance(items['optimizer'], torch.optim.Optimizer)
+        assert items['optimizer_state'] is None or isinstance(items['optimizer_state'], dict)
+        assert items['meta'] is None or isinstance(items['meta'], dict)
+
+    @staticmethod
+    def _safe_load_items(model_file: PathLike) -> dict:
+        items = torch.load(str(model_file))
+        checkpoint._validate_items(items)
+        return items
+
+    @staticmethod
+    def _safe_save_items(model_file: PathLike, items: dict):
+        checkpoint._validate_items(items)
+        torch.save(items, str(model_file))
+
+
 
 
 class ProgressManager:
@@ -79,7 +95,7 @@ class ProgressManager:
             else:
                 self.count = 0
 
-    def __init__(self, patience: int | None = 5, converge: float = .001, overfit: float = .2):
+    def __init__(self, patience: int | None = 5, converge: float = .001, overfit: float = .2, epochs: int = None):
         """
         Args:
             patience: number of steps to wait before stopping, once a threshold values is met. None = never.
@@ -89,10 +105,16 @@ class ProgressManager:
                 overfit = (val_loss - train_loss) / train_loss
         """
 
+        if patience and 0 < patience < 1:
+            assert epochs is not None, "Patience given as fraction of epochs, but epochs was not specified."
+            patience = int(round(patience * epochs))
+
         self.patience = patience
+        self.epochs = epochs
         self._best_val_score = None
 
         self._stop_reason = ''
+        self._stop_epoch = None
         self._is_new_nest = False
 
         def _converge(val_loss, train_loss, last_val_loss, last_train_loss) -> float:
@@ -115,6 +137,10 @@ class ProgressManager:
         return self._stop_reason
 
     @property
+    def stop_epoch(self) -> int:
+        return self._stop_epoch
+
+    @property
     def is_new_best(self) -> bool:
         return self._is_new_nest
 
@@ -127,7 +153,11 @@ class ProgressManager:
             s += " -- New best"
         return s
 
-    def process(self, val_loss: float, train_loss: float, val_score: float) -> None:
+    @property
+    def status_dict(self) -> dict:
+        return {'done': self.should_stop, 'stop_reason': self.stop_reason, 'stop_epoch': self.stop_epoch}
+
+    def process(self, val_loss: float, train_loss: float, val_score: float, epoch: int = None) -> None:
 
         self._is_new_nest = False
         self._stop_reason = ''
@@ -136,11 +166,17 @@ class ProgressManager:
             self.criteria[criterion].update(val_loss, train_loss)
             if self.patience is not None and self.criteria[criterion].count > self.patience:
                 self._stop_reason = criterion
+                self._stop_epoch = epoch
 
         if self._best_val_score is None or val_score > self._best_val_score:
             self._is_new_nest = True
             self._stop_reason = ''
+            self._stop_epoch = None
             self._best_val_score = val_score
+
+        if epoch is not None and self.epochs is not None and (epoch + 1) >= self.epochs:
+            self._stop_reason = 'last_epoch'
+            self._stop_epoch = epoch
 
 
 class BatchManager:
