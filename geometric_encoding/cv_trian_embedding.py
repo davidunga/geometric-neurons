@@ -38,18 +38,19 @@ class CvModelsManager:
             is_trained, meta = CvModelsManager.check_trained_and_get_meta(model_file)
             if not is_trained:
                 continue
-            items.append({"file": model_file, "base_name": meta["base_name"],
+            train_stop = '{stop_reason} [epoch {stop_epoch}]'.format(**meta['train_status'])
+            items.append({"file": model_file, "base_name": meta["base_name"], "train_stop": train_stop,
                           "fold": meta["fold"], "cfg": meta["cfg"], **meta["val"]})
         df = pd.DataFrame.from_records(items)
         if not full:
             metric_cols = [col for col in df.columns if df[col].dtype.kind == 'f']
-            df = df[["base_name", "fold"] + metric_cols]
+            df = df[["base_name", "fold", "train_stop"] + metric_cols]
         return df
 
     @staticmethod
     def get_aggregated_results():
         catalog_df = CvModelsManager.get_catalog()
-        metric_cols = [col for col in catalog_df.columns if col not in ["base_name", "fold"]]
+        metric_cols = [col for col in catalog_df.columns if col not in ["base_name", "fold", "train_stop"]]
         items = []
         for base_name in catalog_df['base_name'].unique():
             rows = catalog_df[catalog_df['base_name'] == base_name]
@@ -146,6 +147,7 @@ def cv_train(skip_existing: bool = True, cfg_before_folds: bool = True):
     cfgs = [cfg for cfg in Config.yield_from_grid()]
     max_folds = max([cfg.training.cv.folds for cfg in cfgs])
 
+    CvModelsManager.refresh_results_file()
     cfg_ix = fold = 0
     sameness_data = None
     for itr in range(len(cfgs) * max_folds):
