@@ -1,11 +1,24 @@
 """
-Dictionary related tools
+Dictionary tools
 """
 
 from itertools import product
 from copy import deepcopy
 from typing import Callable
-import pandas as pd
+
+
+def unpack_nested_dict(d: dict) -> tuple[list, list]:
+    key_paths = []
+    values = []
+    for key, value in d.items():
+        if isinstance(value, dict):
+            for path, path_value in zip(*unpack_nested_dict(value)):
+                key_paths.append([key] + path)
+                values.append(path_value)
+        else:
+            key_paths.append([key])
+            values.append(value)
+    return key_paths, values
 
 
 def dict_product_from_grid(d: dict, grid_suffix: str = '__grid'):
@@ -48,7 +61,7 @@ def dict_product(d):
         yield dict(zip(keys, vals))
 
 
-def update_nested_dict_(d: dict, keys: list, val, allow_new: bool = False):
+def update_nested_dict(d: dict, keys: list, val, allow_new: bool = False):
     """
     Performs d[keys[0]][keys[1]][..] = val
     Args:
@@ -57,39 +70,33 @@ def update_nested_dict_(d: dict, keys: list, val, allow_new: bool = False):
         val: Value to assign
         allow_new: Allow creating new keys?
     """
-    for k in keys[:-1]:
-        if allow_new and (k not in d):
-            d[k] = {}
-        d = d[k]
-    if not allow_new:
-        assert keys[-1] in d
-    d[keys[-1]] = val
+    for key in keys[:-1]:
+        if key not in d and allow_new:
+            d[key] = {}
+        d = d[key]
+    key = keys[-1]
+    if key not in d and not allow_new:
+        raise KeyError(key)
+    d[key] = val
 
 
-def flatten_dict(d, sep='.') -> dict:
+def flatten_dict(d: dict, sep='.') -> dict:
     """ Flatten a nest dict by concatenating nested keys """
-    return pd.json_normalize(d, sep=sep).to_dict(orient='records')[0]
+    key_paths, values = unpack_nested_dict(d)
+    for key_path in key_paths:
+        assert not any(sep in key for key in key_path)
+    flat_keys = [sep.join(key_path) for key_path in key_paths]
+    return dict(zip(flat_keys, values))
 
 
-def unflatten_dict(d, sep='.') -> dict:
+def unflatten_dict(d: dict, sep='.') -> dict:
     ret = {}
     for k, v in d.items():
-        update_nested_dict_(ret, k.split(sep), v, allow_new=True)
+        update_nested_dict(ret, k.split(sep), v, allow_new=True)
     return ret
 
 
-def find_key_in_dict(d: dict, key):
-    """ Return paths (list of lists) to all occurrences of key in dict. """
-    sep = '.'
-    d_flat = flatten_dict(d, sep=sep)
-    paths = []
-    for k in d_flat:
-        if k.endswith(sep + key):
-            paths.append(k.split(sep))
-    return paths
-
-
-def dict_sort(d):
+def dict_sort(d: dict):
     return dict_recursive(d, lambda d: dict(sorted(d.items())))
 
 
@@ -104,7 +111,7 @@ def dict_recursive(d: dict, fn: Callable[[dict], dict]) -> dict:
             for k, v in fn(d).items()}
 
 
-
 if __name__ == "__main__":
     d = {"a": {"aa": [11, 12], "bb__grid": [22, 23]}, "b__grid": [2,3]}
-    print(list(dict_product_from_grid(d)))
+    for d in dict_product_from_grid(d):
+        print(d)
