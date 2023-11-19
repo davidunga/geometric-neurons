@@ -136,15 +136,45 @@ def single_fold_train(cfg: Config, fold: int, sameness_data: Optional[SamenessDa
     return result
 
 
-def cv_train(skip_existing: bool = True):
+def cv_train(skip_existing: bool = True, cfg_before_folds: bool = True):
+    """
+    Args:
+        skip_existing: skip existing (fully trained) models
+        cfg_before_folds: it True, inner loop is over configurations, if False- over folds.
+    """
+
     cfgs = [cfg for cfg in Config.yield_from_grid()]
-    for cfg_num, cfg in enumerate(cfgs, start=1):
-        sameness_data = None
-        for fold in range(cfg.training.cv.folds):
-            print(f"cfg {cfg_num}/{len(cfgs)}, fold {fold}:", end=" ")
-            result = single_fold_train(cfg=cfg, fold=fold, sameness_data=sameness_data, skip_existing=skip_existing)
-            sameness_data = result['sameness_data']
-            print("Results so far: \n" + CvModelsManager.get_catalog().to_string() + "\n")
+
+    folds = [cfg.training.cv.folds for cfg in cfgs]
+    assert len(set(folds)) == 1
+    folds = folds[0]
+
+    cfg_ix = fold = -1
+    while True:
+
+        if cfg_before_folds:
+            cfg_ix += 1
+            if cfg_ix in (0, len(cfgs)):
+                fold, cfg_ix, sameness_data = (fold + 1, 0, None)
+        else:
+            fold += 1
+            if fold in (0, folds):
+                fold, cfg_ix, sameness_data = (0, cfg_ix + 1, None)
+        if cfg_ix == len(cfgs) or fold == folds:
+            break
+
+        cfg = cfgs[cfg_ix]
+
+
+    # for cfg_num, cfg in enumerate(cfgs, start=1):
+    #     sameness_data = None
+    #     for fold in range(cfg.training.cv.folds):
+
+        print(f"cfg {cfg_ix + 1}/{len(cfgs)}, fold {fold}:", end=" ")
+        result = single_fold_train(cfg=cfg, fold=fold, sameness_data=sameness_data, skip_existing=skip_existing)
+        sameness_data = result['sameness_data']
+        print("Results so far: \n" + CvModelsManager.get_catalog(full=True).to_string() + "\n")
+        CvModelsManager.refresh_results_file()
 
 
 if __name__ == "__main__":
