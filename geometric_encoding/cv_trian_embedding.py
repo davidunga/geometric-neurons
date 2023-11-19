@@ -1,5 +1,6 @@
 import json
 from itertools import product
+from datetime import datetime
 import numpy as np
 import pandas as pd
 from analysis.config import Config
@@ -16,6 +17,8 @@ from common.utils import dictools
 
 class CvModelsManager:
 
+    RESULTS_FILE = paths.CV_DIR / "results.txt"
+
     @staticmethod
     def make_model_file_path(cfg: Config | str, fold: int | str) -> Path:
         cfg_token = cfg if isinstance(cfg, str) else cfg.str()
@@ -28,7 +31,7 @@ class CvModelsManager:
                                                          fold="*" if fold is None else fold).as_posix())
 
     @staticmethod
-    def get_catalog() -> pd.DataFrame:
+    def get_catalog(full: bool = False) -> pd.DataFrame:
         model_files = CvModelsManager.get_model_files()
         items = []
         for model_file in model_files:
@@ -38,7 +41,37 @@ class CvModelsManager:
             items.append({"file": model_file, "base_name": meta["base_name"],
                           "fold": meta["fold"], "cfg": meta["cfg"], **meta["val"]})
         df = pd.DataFrame.from_records(items)
+        if not full:
+            metric_cols = [col for col in df.columns if df[col].dtype.kind == 'f']
+            df = df[["base_name", "fold"] + metric_cols]
         return df
+
+    @staticmethod
+    def get_aggregated_results():
+        catalog_df = CvModelsManager.get_catalog()
+        metric_cols = [col for col in catalog_df.columns if col not in ["base_name", "fold"]]
+        items = []
+        for base_name in catalog_df['base_name'].unique():
+            rows = catalog_df[catalog_df['base_name'] == base_name]
+            item = {'base_name': base_name, 'fold_count': len(rows)}
+            for col in metric_cols:
+                metric_values = rows[col].to_numpy()
+                item[f'mean_{col}'] = np.mean(metric_values)
+            items.append(item)
+        df = pd.DataFrame.from_records(items)
+        df = df.sort_values(by='mean_auc', ascending=False, ignore_index=True)
+        return df
+
+    @staticmethod
+    def refresh_results_file():
+        agg_df = CvModelsManager.get_aggregated_results()
+        catalog_df = CvModelsManager.get_catalog()
+        with CvModelsManager.RESULTS_FILE.open("w") as f:
+            f.write("Refresh time: " + str(pd.Timestamp.now()))
+            f.write("\nSummary:\n")
+            f.write(agg_df.to_string())
+            f.write("\n\nCatalog:\n")
+            f.write(catalog_df.to_string())
 
     @staticmethod
     def check_trained_and_get_meta(model_file: PathLike):
