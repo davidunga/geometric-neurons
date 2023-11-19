@@ -140,41 +140,40 @@ def cv_train(skip_existing: bool = True, cfg_before_folds: bool = True):
     """
     Args:
         skip_existing: skip existing (fully trained) models
-        cfg_before_folds: it True, inner loop is over configurations, if False- over folds.
+        cfg_before_folds: iterate over configs before iterating over folds
     """
 
     cfgs = [cfg for cfg in Config.yield_from_grid()]
+    max_folds = max([cfg.training.cv.folds for cfg in cfgs])
 
-    folds = [cfg.training.cv.folds for cfg in cfgs]
-    assert len(set(folds)) == 1
-    folds = folds[0]
+    cfg_ix = fold = 0
+    sameness_data = None
+    for itr in range(len(cfgs) * max_folds):
 
-    cfg_ix = fold = -1
-    while True:
+        if itr > 0:
+            if cfg_before_folds:
+                cfg_ix = (cfg_ix + 1) % len(cfgs)
+                sameness_data = None  # new config -> reset sameness
+                if cfg_ix == 0:
+                    fold += 1
+            else:
+                fold = (fold + 1) % cfgs[cfg_ix].training.cv.folds
+                if fold == 0:
+                    cfg_ix += 1
+                    sameness_data = None  # new config -> reset sameness
 
-        if cfg_before_folds:
-            cfg_ix += 1
-            if cfg_ix in (0, len(cfgs)):
-                fold, cfg_ix, sameness_data = (fold + 1, 0, None)
-        else:
-            fold += 1
-            if fold in (0, folds):
-                fold, cfg_ix, sameness_data = (0, cfg_ix + 1, None)
-        if cfg_ix == len(cfgs) or fold == folds:
+        if fold == max_folds or cfg_ix == len(cfgs):
             break
-
-        cfg = cfgs[cfg_ix]
-
-
-    # for cfg_num, cfg in enumerate(cfgs, start=1):
-    #     sameness_data = None
-    #     for fold in range(cfg.training.cv.folds):
+        if fold == cfgs[cfg_ix].training.cv.folds:
+            continue
 
         print(f"cfg {cfg_ix + 1}/{len(cfgs)}, fold {fold}:", end=" ")
-        result = single_fold_train(cfg=cfg, fold=fold, sameness_data=sameness_data, skip_existing=skip_existing)
+        result = single_fold_train(cfg=cfgs[cfg_ix], fold=fold,
+                                   sameness_data=sameness_data, skip_existing=skip_existing)
         sameness_data = result['sameness_data']
-        print("Results so far: \n" + CvModelsManager.get_catalog(full=True).to_string() + "\n")
-        CvModelsManager.refresh_results_file()
+        if not result['skipped']:
+            print("Results so far: \n" + CvModelsManager.get_catalog(full=True).to_string() + "\n")
+            CvModelsManager.refresh_results_file()
 
 
 if __name__ == "__main__":
