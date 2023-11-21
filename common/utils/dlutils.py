@@ -72,8 +72,6 @@ class checkpoint:
         torch.save(items, str(model_file))
 
 
-
-
 class ProgressManager:
 
     @dataclass
@@ -86,32 +84,42 @@ class ProgressManager:
         _last_val_loss: float = None
         _last_train_loss: float = None
 
-        def update(self, val_loss: float, train_loss: float) -> None:
+        def update(self, val_loss: float, train_loss: float, enable_count: bool) -> None:
             self.value = self.fn(val_loss, train_loss, self._last_val_loss, self._last_train_loss)
             self._last_val_loss = val_loss
             self._last_train_loss = train_loss
-            if (self.value > self.thresh) == self.check_above:
+            if enable_count and ((self.value > self.thresh) == self.check_above):
                 self.count += 1
             else:
                 self.count = 0
 
-    def __init__(self, patience: int | None = 5, converge: float = .001, overfit: float = .2, epochs: int = None):
+    def __init__(self, patience=5, converge: float = .001, overfit: float = .2, epochs: int = None, grace_period=0):
         """
         Args:
             patience: number of steps to wait before stopping, once a threshold values is met. None = never.
+                if patience value is between 0 & 1, patience = round(value * epochs)
             converge: convergence threshold
                 convergence = (last_val_loss - val_loss) / last_val_loss
             overfit: overfit threshold
                 overfit = (val_loss - train_loss) / train_loss
+            grace_period: steps to wait before starting. None = same as patience.
         """
 
         if patience and 0 < patience < 1:
             assert epochs is not None, "Patience given as fraction of epochs, but epochs was not specified."
             patience = int(round(patience * epochs))
 
+        if grace_period is None:
+            grace_period = patience if patience is not None else 0
+        elif 0 < grace_period < 1:
+            assert epochs is not None, "Grace period given as fraction of epochs, but epochs was not specified."
+            grace_period = int(round(grace_period * epochs))
+
         self.patience = patience
         self.epochs = epochs
+        self.grace_period = grace_period
         self._best_val_score = None
+        self._epoch = 0
 
         self._stop_reason = ''
         self._stop_epoch = None
@@ -159,11 +167,17 @@ class ProgressManager:
 
     def process(self, val_loss: float, train_loss: float, val_score: float, epoch: int = None) -> None:
 
+        if epoch is not None:
+            self._epoch = epoch
+        else:
+            self._epoch += 1
+        epoch = self._epoch
+
         self._is_new_nest = False
         self._stop_reason = ''
 
         for criterion in self.criteria:
-            self.criteria[criterion].update(val_loss, train_loss)
+            self.criteria[criterion].update(val_loss, train_loss, enable_count=epoch >= self.grace_period)
             if self.patience is not None and self.criteria[criterion].count > self.patience:
                 self._stop_reason = criterion
                 self._stop_epoch = epoch
@@ -174,7 +188,7 @@ class ProgressManager:
             self._stop_epoch = None
             self._best_val_score = val_score
 
-        if epoch is not None and self.epochs is not None and (epoch + 1) >= self.epochs:
+        if self.epochs is not None and (epoch + 1) >= self.epochs:
             self._stop_reason = 'last_epoch'
             self._stop_epoch = epoch
 

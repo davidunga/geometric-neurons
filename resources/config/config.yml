@@ -29,7 +29,7 @@ training:
     converge: 1.e-4
   epochs: 100
   batch_size: 64
-  epoch_size_factor: .1
+  epoch_size_factor: .25
   loss_margin: 1.0
   optim_params:
     kind__grid: [SGD, Adam]

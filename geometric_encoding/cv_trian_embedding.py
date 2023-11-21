@@ -129,7 +129,7 @@ def single_fold_train(cfg: Config, fold: int, sameness_data: Optional[SamenessDa
         val_sameness = sameness_data.copy(shuffled_items[n_train_items:])
 
     model = LinearEmbedder(input_size=sameness_data.X.shape[1], **cfg.model)
-    triplet_train(train_sameness=train_sameness, val_sameness=val_sameness, model=model, model_dump_file=model_file,
+    triplet_train(train_sameness=train_sameness, val_sameness=val_sameness, model=model, model_file=model_file,
                   tensorboard_dir=tensorboard_dir, **dictools.modify_dict(cfg.training, exclude=['cv'], copy=True))
 
     checkpoint.update_meta(model_file, base_name=cfg.str(), fold=fold, cfg=cfg.__dict__)
