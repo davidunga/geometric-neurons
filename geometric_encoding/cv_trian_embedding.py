@@ -13,6 +13,8 @@ from glob import glob
 from common.utils.typings import *
 from common.utils.dlutils import checkpoint
 from common.utils import dictools
+import os
+from time import time
 
 
 class CvModelsManager:
@@ -35,12 +37,12 @@ class CvModelsManager:
         model_files = CvModelsManager.get_model_files()
         items = []
         for model_file in model_files:
-            is_trained, meta = CvModelsManager.check_trained_and_get_meta(model_file)
-            if not is_trained:
+            status, meta = CvModelsManager.get_meta_and_training_status(model_file)
+            if status != 'complete':
                 continue
             train_stop = '{stop_reason} [epoch {stop_epoch}]'.format(**meta['train_status'])
             items.append({"file": model_file, "base_name": meta["base_name"], "train_stop": train_stop,
-                          "fold": meta["fold"], "cfg": meta["cfg"], **meta["val"]})
+                          "fold": meta["fold"], "cfg": json.dumps(meta["cfg"]), **meta["val"]})
         df = pd.DataFrame.from_records(items)
         if not full:
             metric_cols = [col for col in df.columns if df[col].dtype.kind == 'f']
@@ -75,12 +77,16 @@ class CvModelsManager:
             f.write(catalog_df.to_string())
 
     @staticmethod
-    def check_trained_and_get_meta(model_file: PathLike):
-        if not Path(model_file).is_file():
-            return False, {}
-        meta = checkpoint.get_meta(model_file)
-        is_trained = meta["train_status"]["done"]
-        return is_trained, meta
+    def get_meta_and_training_status(model_file: PathLike, train_time_tol: float = 1800.):
+        if Path(model_file).is_file():
+            meta = checkpoint.get_meta(model_file)
+            if meta["train_status"]["done"]:
+                return 'complete', meta
+        for file in glob(str(model_file) + "*"):
+            if time() - os.path.getmtime(file) < train_time_tol:
+                meta = checkpoint.get_meta(file)
+                return 'in progress', meta
+        return 'none', {}
 
 
 def single_fold_train(cfg: Config, fold: int, sameness_data: Optional[SamenessData] = None,
@@ -101,14 +107,14 @@ def single_fold_train(cfg: Config, fold: int, sameness_data: Optional[SamenessDa
     tensorboard_dir = paths.TENSORBOARD_DIR / model_file.stem
 
     result = {'skipped': False,
-              'existed': CvModelsManager.check_trained_and_get_meta(model_file)[0],
+              'training_status': CvModelsManager.get_meta_and_training_status(model_file)[0],
               'model_file': model_file,
               'tensorboard_dir': tensorboard_dir,
               'sameness_data': sameness_data}
 
-    if result['existed'] and skip_existing:
+    if result['training_status'] != 'none' and skip_existing:
         result['skipped'] = True
-        if verbose: print(model_file.as_posix(), "- SKIPPED")
+        if verbose: print(model_file.as_posix(), f"- SKIPPED [training {result['training_status']}]")
         return result
 
     if verbose: print(model_file.as_posix(), "- RUNNING")

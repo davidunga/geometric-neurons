@@ -5,15 +5,13 @@ import inspect
 from dataclasses import dataclass
 from collections import defaultdict
 from common.utils.typings import *
-import logging
 import functools
-#import time
 
 
 class progbar:
 
     def __init__(self, x: int | Iterable, n: int = None, prefix: str = "", suffix: str = "",
-                 span: int = 10, enum: bool = False, leave: str = "none"):
+                 span: int = 10, enum: bool = False, leave: str = "none", refresh_frq: float = 1.):
 
         """
         progress bar.
@@ -26,6 +24,7 @@ class progbar:
             enum: flag - add enumeration
             leave: fields to leave after completion. either comma-separated string, "all", or "none".
                 e.g., "prefix,bar,suffix"
+            refresh_frq: number of seconds between refreshes
         """
 
         self.x = range(x) if isinstance(x, int) else x
@@ -39,7 +38,9 @@ class progbar:
         self.s = ""
         self._is_sized = self.n is not None
         self._t_start = None
-        pass
+        self._t_last_update = None
+        self.refresh_frq = refresh_frq
+        self.print = functools.partial(print, flush=True)  # avoid printing buffer
 
     def update(self, **kwargs):
         """
@@ -52,12 +53,16 @@ class progbar:
         if self._t_start is None:
             self._t_start = time()
 
+        t = time()
+        if self._t_last_update and (t - self._t_last_update) < self.refresh_frq:
+            return
+
         elements = {}
         elements['prefix'] = self.prefix
         elements['bar'] = self._make_bar()
         elements['count'] = self._make_count()
         elements['percent'] = self._make_percent()
-        elements['time'] = self._make_time()
+        elements['time'] = self._make_time(t)
         elements['suffix'] = self.suffix
 
         for k in kwargs:
@@ -72,10 +77,11 @@ class progbar:
         self.clear()
         sp = "|"
         self.s = sp.join([v for v in elements.values() if len(v)]) + (sp if len(elements) > 1 else "")
-        print(self.s, end="")
+        self.print(self.s, end="")
+        self._t_last_update = t
 
     def clear(self):
-        print("\b" * len(self.s), end="")
+        self.print("\b" * len(self.s), end="")
 
     def __iter__(self):
         for self.count, xx in enumerate(self.x, start=1):
@@ -104,8 +110,8 @@ class progbar:
             b[self.count % self.span] = _full_element
         return "".join(b)
 
-    def _make_time(self) -> str:
-        t_elapsed = time() - self._t_start
+    def _make_time(self, t) -> str:
+        t_elapsed = t - self._t_start
         t_avg = t_elapsed / self.count
         remain_str = f"<{t_avg * (self.n - self.count):2.3f}s" if self._is_sized else ""
         return f"{t_elapsed:2.3f}s{remain_str},{t_avg:2.3f}s"
