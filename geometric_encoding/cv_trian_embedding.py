@@ -42,17 +42,23 @@ class CvModelsManager:
                 continue
             train_stop = '{stop_reason} [epoch {stop_epoch}]'.format(**meta['train_status'])
             items.append({"file": model_file, "base_name": meta["base_name"], "train_stop": train_stop,
-                          "fold": meta["fold"], "cfg": json.dumps(meta["cfg"]), **meta["val"]})
+                          "fold": meta["fold"], "cfg": meta["cfg"], **meta["val"]})
         df = pd.DataFrame.from_records(items)
+        variance_cfgs = dictools.variance_dicts([item["cfg"] for item in items])
+        grid_df = pd.DataFrame.from_records(variance_cfgs)
+        grid_df.rename(columns={c: f'grid.{c}' for c in grid_df.columns}, inplace=True)
         if not full:
             metric_cols = [col for col in df.columns if df[col].dtype.kind == 'f']
             df = df[["base_name", "fold", "train_stop"] + metric_cols]
+        df = pd.concat([df, grid_df], axis=1)
         return df
 
     @staticmethod
     def get_aggregated_results():
         catalog_df = CvModelsManager.get_catalog()
-        metric_cols = [col for col in catalog_df.columns if col not in ["base_name", "fold", "train_stop"]]
+        grid_cols = [col for col in catalog_df.columns if col.startswith("grid")]
+        nonmetric_cols = ["base_name", "fold", "train_stop"] + grid_cols
+        metric_cols = [col for col in catalog_df.columns if col not in nonmetric_cols]
         items = []
         for base_name in catalog_df['base_name'].unique():
             rows = catalog_df[catalog_df['base_name'] == base_name]
@@ -60,6 +66,7 @@ class CvModelsManager:
             for col in metric_cols:
                 metric_values = rows[col].to_numpy()
                 item[f'mean_{col}'] = np.mean(metric_values)
+            item.update(rows.iloc[0][grid_cols].to_dict())
             items.append(item)
         df = pd.DataFrame.from_records(items)
         df = df.sort_values(by='mean_auc', ascending=False, ignore_index=True)
@@ -180,9 +187,10 @@ def cv_train(skip_existing: bool = True, cfg_before_folds: bool = True):
                                    sameness_data=sameness_data, skip_existing=skip_existing)
         sameness_data = result['sameness_data']
         if not result['skipped']:
-            print("Results so far: \n" + CvModelsManager.get_catalog(full=True).to_string() + "\n")
+            print("Results so far: \n" + CvModelsManager.get_catalog(full=False).to_string() + "\n")
             CvModelsManager.refresh_results_file()
 
 
 if __name__ == "__main__":
+    CvModelsManager.refresh_results_file()
     cv_train()

@@ -14,15 +14,34 @@ from common.utils import dictools, hashtools
 
 _configs_grid = yaml.safe_load((paths.CONFIG_DIR / 'config.yml').open())
 
+# fields that were added to configs, and their default values
+# used for backward compatibility in terms of hash and data structure
+_ADDED_FIELDS_AND_DEFAULTS = {"data.sameness.normalize_neural": False}
+
 
 @dataclass(init=False)
 class Config:
 
     def __init__(self, cfg: dict):
+
+        cfg = dictools.flatten_dict(cfg)
+        for added_key, default_value in _ADDED_FIELDS_AND_DEFAULTS.items():
+            if added_key not in cfg:
+                cfg[added_key] = default_value
+        cfg = dictools.unflatten_dict(cfg)
+
         cfg = munchify(cfg)
         self.data = DataConfig(cfg.data)
         self.model = ModelConfig(cfg.model)
         self.training = TrainingConfig(cfg.training)
+
+    def _dict_for_hashing(self):
+        d = dictools.flatten_dict(self.__dict__)
+        for added_key, default_value in _ADDED_FIELDS_AND_DEFAULTS.items():
+            if d[added_key] == default_value:
+                del d[added_key]
+        d = dictools.unflatten_dict(d)
+        return d
 
     @classmethod
     def from_default(cls):
@@ -35,13 +54,13 @@ class Config:
 
     def str(self) -> str:
         hash_size = 6
-        return self.data.str(DataConfig.PAIRING) + " " + hashtools.calc_hash(self, fmt='hex')[:hash_size]
+        return self.data.str(DataConfig.PAIRING) + " " + hashtools.calc_hash(self._dict_for_hashing(), fmt='hex')[:hash_size]
 
     def __str__(self):
         return self.str()
 
     def __hash__(self) -> int:
-        return hashtools.calc_hash(self, fmt='int')
+        return hashtools.calc_hash(self._dict_for_hashing(), fmt='int')
 
     @property
     def __dict__(self) -> dict:

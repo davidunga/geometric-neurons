@@ -15,6 +15,7 @@ data:
     sameness:
       flat_neural_bin_sz__grid: [.05, .02]
       triplet_min_prevalence: 5
+      normalize_neural: True
 
 model:
   dim__grid: [5, 4]

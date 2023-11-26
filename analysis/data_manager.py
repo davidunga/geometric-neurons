@@ -56,7 +56,12 @@ class DataMgr:
         """ i-th row = processed (reduced and flattened) activations of i-th segment.
             column names = '<neuron_name>.<time_bin>'
         """
-        serieses = [s.neural.get_binned(bin_sz=self.cfg.sameness.flat_neural_bin_sz)._df.stack() for s in segmets]
+        neural_data = [s.neural.get_binned(bin_sz=self.cfg.sameness.flat_neural_bin_sz)._df for s in segmets]
+        if self.cfg.sameness.normalize_neural:
+            mu = np.mean(np.concatenate(neural_data, axis=0), axis=0)
+            sd = np.maximum(np.std(np.concatenate(neural_data, axis=0), axis=0), 1e-6)
+            neural_data = [(d - mu) / sd for d in neural_data]
+        serieses = [d.stack() for d in neural_data]
         df = pd.concat(serieses, axis=1)
         df.index = [f'{col_name}.{index}' for index, col_name in df.index]
         return df.T
