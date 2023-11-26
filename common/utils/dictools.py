@@ -6,6 +6,9 @@ from itertools import product
 from copy import deepcopy
 from typing import Callable
 
+import numpy as np
+import pandas as pd
+
 
 def unpack_nested_dict(d: dict) -> tuple[list, list]:
     key_paths = []
@@ -32,6 +35,23 @@ def dict_product_from_grid(d: dict, grid_suffix: str = '__grid'):
             new_d[k] = [v]
     for d in dict_product(new_d):
         yield unflatten_dict(d)
+
+
+def variance_dicts(dicts: list[dict], flat: bool = True):
+    """ ignore keys where all dicts have the same value """
+    def _is_unique(s: pd.Series):
+        try:
+            return len(s.unique()) == 1
+        except:
+            return len(np.unique(s.to_numpy())) == 1
+    flat_dicts = [flatten_dict(d) for d in dicts]
+    df = pd.DataFrame.from_records(flat_dicts)
+    variance_flat_keys = [col for col in df.columns if not _is_unique(df[col])]
+    variance_dicts = [{k: d[k] for k in variance_flat_keys} for d in flat_dicts]
+    if not flat:
+        variance_dicts = [unflatten_dict(d) for d in variance_dicts]
+    return variance_dicts
+
 
 
 def modify_dict(base_dict: dict, copy: bool, exclude: list = None,
