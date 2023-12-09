@@ -1,5 +1,5 @@
 """ Deep-learning utilities """
-
+import pandas as pd
 import torch
 from common.utils.typings import *
 from dataclasses import dataclass
@@ -74,34 +74,54 @@ class checkpoint:
 
 class ProgressManager:
 
-    @dataclass
     class StopCriterion:
-        thresh: float
-        check_above: bool
-        fn: Callable[[float, float, float], float]
-        value: float = .0
-        count: int = 0
-        _last_val_loss: float = None
-        _last_train_loss: float = None
+        stop_if: Literal['low', 'high']
+
+        def __init__(self, thresh: float):
+            assert self.stop_if in ('low', 'high')
+            self.thresh = thresh
+            self.value: float = .0
+            self.count: int = 0
+            self._last_val_loss: float = None
+            self._last_train_loss: float = None
+
+        @staticmethod
+        def calc(val_loss: float, train_loss: float, last_val_loss: float, last_train_loss: float) -> float:
+            raise NotImplementedError()
 
         def update(self, val_loss: float, train_loss: float, enable_count: bool) -> None:
-            self.value = self.fn(val_loss, train_loss, self._last_val_loss, self._last_train_loss)
+            self.value = self.calc(val_loss, train_loss, self._last_val_loss, self._last_train_loss)
             self._last_val_loss = val_loss
             self._last_train_loss = train_loss
-            if enable_count and ((self.value > self.thresh) == self.check_above):
+            if enable_count and ((self.value > self.thresh) == (self.stop_if == 'high')):
                 self.count += 1
             else:
                 self.count = 0
 
+    class StopCriterionConverge(StopCriterion):
+        stop_if = 'low'
+
+        @staticmethod
+        def calc(val_loss: float, train_loss: float, last_val_loss: float, last_train_loss: float) -> float:
+            return 1. if last_val_loss is None else (last_val_loss - val_loss) / last_val_loss
+
+    class StopCriterionOverfit(StopCriterion):
+        stop_if = 'high'
+
+        @staticmethod
+        def calc(val_loss: float, train_loss: float, last_val_loss: float, last_train_loss: float) -> float:
+            return val_loss / max(train_loss, 1e-9) - 1
+
     def __init__(self, patience=5, converge: float = .001, overfit: float = .2, epochs: int = None, grace_period=0):
         """
         Args:
-            patience: number of steps to wait before stopping, once a threshold values is met. None = never.
+            patience: number of steps (epochs) to wait before stopping, once a threshold values is met. None = never.
                 if patience value is between 0 & 1, patience = round(value * epochs)
             converge: convergence threshold
                 convergence = (last_val_loss - val_loss) / last_val_loss
             overfit: overfit threshold
                 overfit = (val_loss - train_loss) / train_loss
+            epochs: total number of training epochs
             grace_period: steps to wait before starting. None = same as patience.
         """
 
@@ -125,15 +145,9 @@ class ProgressManager:
         self._stop_epoch = None
         self._is_new_nest = False
 
-        def _converge(val_loss, train_loss, last_val_loss, last_train_loss) -> float:
-            return 1. if last_val_loss is None else (last_val_loss - val_loss) / last_val_loss
-
-        def _overfit(val_loss, train_loss, last_val_loss, last_train_loss) -> float:
-            return val_loss / max(train_loss, 1e-9) - 1
-
         self.criteria: dict[str, ProgressManager.StopCriterion] = {
-            'converge': ProgressManager.StopCriterion(thresh=converge, check_above=False, fn=_converge),
-            'overfit': ProgressManager.StopCriterion(thresh=overfit, check_above=True, fn=_overfit)
+            'converge': ProgressManager.StopCriterionConverge(thresh=converge),
+            'overfit': ProgressManager.StopCriterionOverfit(thresh=overfit)
         }
 
     @property
@@ -221,6 +235,170 @@ class BatchManager:
             start = 0
             stop = self.batch_size
         return self.epoch_items[start: stop]
+
+
+def load_tensorboard_as_df(tbdir: PathLike, smooth_sigma: float = 2) -> pd.DataFrame:
+    import tbparse
+    from scipy.ndimage import gaussian_filter1d
+
+    reader = tbparse.SummaryReader(str(tbdir), extra_columns={'dir_name'})
+    df = reader.scalars
+    df['split'] = [dn.split('_')[-1] for dn in df['dir_name']]
+    smoothed = df['value'].to_numpy().copy()
+    for dir_name in df['dir_name'].unique():
+        ii = np.nonzero(df['dir_name'] == dir_name)[0]
+        smoothed[ii] = gaussian_filter1d(smoothed[ii], sigma=smooth_sigma, mode='nearest')
+    df['smoothed_value'] = smoothed
+
+    return df
+
+
+
+def plot_tensorboard(tbdir: PathLike, stat_win_size: int = 10, title_suffix: str = '', txt: str = ''):
+    import tbparse
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import matplotlib.pylab as pylab
+    from itertools import product
+
+    params = {'legend.fontsize': 'x-small',
+              'figure.figsize': (15, 5),
+              'axes.labelsize': 'x-small',
+              'axes.titlesize': 'small',
+              'xtick.labelsize': 'x-small',
+              'ytick.labelsize': 'x-small'}
+    pylab.rcParams.update(params)
+
+    def remove_inner_labels(axs, keep_legend: tuple | str = (0, 0)):
+        if axs.ndim == 1:
+            axs = axs.reshape(1, -1)
+        if not isinstance(keep_legend, str):
+            keep_legend = tuple([k if k >= 0 else axs.shape[i] + k for i, k in enumerate(keep_legend)])
+        for i, j in product(range(axs.shape[0]), range(axs.shape[1])):
+            if i != axs.shape[0] - 1:
+                axs[i, j].set_xlabel(None)
+            if j != 0:
+                axs[i, j].set_ylabel(None)
+            if keep_legend != 'all' and keep_legend != (i, j):
+                axs[i, j].get_legend().remove()
+
+    def _text_wrap(txt: str | list, max_line_len: int = 50):
+        link_chars = (':', '=')
+        split_chars = (' ', ',')
+
+        if isinstance(txt, str):
+            txt = txt.split('\n')
+        assert isinstance(txt, list)
+
+        wraped_lines = []
+        for line in txt:
+
+            splittable_ixs = [0]
+            sizes = [0]
+            for i in range(1, len(line) - 1):
+                if line[i] in split_chars and line[i - 1] not in link_chars and line[i + 1] not in split_chars:
+                    sizes.append(i - splittable_ixs[-1])
+                    splittable_ixs.append(i)
+
+            split_ixs = [0]
+            line_size = 0
+            for sz, ix in zip(sizes, splittable_ixs):
+                if line_size + sz > max_line_len:
+                    split_ixs.append(ix)
+                    line_size = 0
+                else:
+                    line_size += sz
+            split_ixs.append(len(line))
+
+            for i in range(len(split_ixs) - 1):
+                wraped_lines.append(line[split_ixs[i]: split_ixs[i + 1]])
+
+        return '\n'.join(wraped_lines)
+
+
+    def set_out_labels(axs, x: str | list = None, y: str | list = None):
+        if axs.ndim == 1:
+            axs = axs.reshape(1, -1)
+        for ax in axs:
+            ax.set_xlabel(None)
+            ax.set_ylabel(None)
+
+        def _set_labels(xory: str, axs_, labels_):
+            assert xory in ('x', 'y')
+            if labels_ is None:
+                return
+            if isinstance(labels_, str):
+                labels_ = [labels_] * len(axs_)
+            assert len(axs_) == len(labels_)
+            for ax_, label_ in zip(axs_, labels_):
+                if xory == 'x':
+                    ax_.set_xlabel(label_)
+                else:
+                    ax_.set_ylabel(label_)
+
+        _set_labels('x', axs[-1, :], x)
+        _set_labels('y', axs[:, 0], y)
+
+
+    from scipy.ndimage import gaussian_filter1d
+
+    reader = tbparse.SummaryReader(str(tbdir), extra_columns={'dir_name'})
+    df = reader.scalars
+    df['split'] = [dn.split('_')[-1] for dn in df['dir_name']]
+    smoothed = df['value'].to_numpy().copy()
+    for dir_name in df['dir_name'].unique():
+        ii = np.nonzero(df['dir_name'] == dir_name)[0]
+        smoothed[ii] = gaussian_filter1d(smoothed[ii], sigma=2, mode='nearest')
+    df['smoothed_value'] = smoothed
+
+    tags = df['tag'].unique()
+    splits = df['split'].unique()
+    #
+    #
+    #
+    # def _smooth(v, r: int):
+    #     u = np.zeros(len(v), float)
+    #     for i in range(len(v)):
+    #         i_start = max(i - r, 0)
+    #         i_end = min(i + r + 1, len(v))
+    #         u[i] = sum(v[i_start: i_end]) / (i_end - i_start + 1)
+    #     return u
+    # df['smooth_value'] = _smooth(df['value'].to_numpy(), 1) # gaussian_filter1d(df['value'].to_numpy(), sigma=.5,
+    # # mode='nearest', truncate=4)
+
+    fig, axs = plt.subplots(nrows=1, ncols=len(tags))
+    fig.set_size_inches(15, 6, forward=True)
+
+    for i, tag in enumerate(tags):
+        tag_data = df[df['tag'] == tag]
+        title_txt = '\n' + tag
+        for split in splits:
+            v = tag_data[tag_data['split'] == split]['smoothed_value'].to_numpy()[-10:]
+            #gaussian_filter1d(v, sigma=1., mode='nearest')
+            imprv = np.mean(np.diff(v)/v[:-1]) * 100
+            title_txt += f'\n{split:5s} '
+            title_txt += f'imprv={imprv:2.3f}'
+            #title_txt += f'(min,avg,max) = ({np.min(v):2.2f},{np.mean(v[-stat_win_size:]):2.2f},{np.max(v):2.2f})'
+
+        sns.set_palette("Greens")
+        g = sns.lineplot(data=tag_data, x='step', y='value', hue='split', ax=axs[i])
+        sns.set_palette("Blues")
+        g = sns.lineplot(data=tag_data, x='step', y='smoothed_value', hue='split', ax=axs[i])
+        g.set(title=title_txt)
+        g.get_legend().set_title(None)
+
+    remove_inner_labels(axs)
+    if txt:
+        txt = _text_wrap(txt, 100)
+        axs[0].text(0.01, -.1, txt, transform=axs[0].transAxes, fontsize=10,
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='w', alpha=0.2))
+
+    plt.subplots_adjust(top=0.85, bottom=0.15)
+
+    name = '/'.join(Path(reader.log_path).parts[-2:]) + ' ' + title_suffix
+    fig.canvas.manager.set_window_title(name)
+
+
 
 
 if __name__ == "__main__":
