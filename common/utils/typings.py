@@ -1,5 +1,5 @@
 from numpy.typing import NDArray, ArrayLike
-from typing import Any, Sequence, Generator, Iterator, Optional, Container, Iterable, Collection, Sized, Callable
+from typing import Any, Sequence, Generator, Iterator, Optional, Container, Iterable, Collection, Sized, Callable, Literal
 from pathlib import Path
 
 NpVec = NDArray

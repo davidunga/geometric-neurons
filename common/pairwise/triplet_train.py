@@ -6,6 +6,7 @@ import shutil
 from common.utils import dlutils
 from common.pairwise.sameness import SamenessData, SamenessEval
 from common.utils.devtools import progbar
+from common.utils.typings import *
 
 
 def triplet_train(
@@ -22,7 +23,7 @@ def triplet_train(
         tensorboard_dir: Path = None,
         progress_mgr_params: dict = None,
         checkpoint_every: int = 5,
-        warm_start_mode: str = "always"
+        warm_start_mode: Literal["never", "allow", "always"] = "always"
 ):
 
     _DBG_RUN = False
