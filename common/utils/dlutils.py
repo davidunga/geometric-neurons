@@ -380,10 +380,10 @@ def plot_tensorboard(tbdir: PathLike, stat_win_size: int = 10, title_suffix: str
             title_txt += f'imprv={imprv:2.3f}'
             #title_txt += f'(min,avg,max) = ({np.min(v):2.2f},{np.mean(v[-stat_win_size:]):2.2f},{np.max(v):2.2f})'
 
-        sns.set_palette("Greens")
-        g = sns.lineplot(data=tag_data, x='step', y='value', hue='split', ax=axs[i])
-        sns.set_palette("Blues")
-        g = sns.lineplot(data=tag_data, x='step', y='smoothed_value', hue='split', ax=axs[i])
+        g = sns.lineplot(data=tag_data, x='step', y='value', hue='split',
+                         ax=axs[i], palette=['c', 'm'], alpha=.5)
+        g = sns.lineplot(data=tag_data, x='step', y='smoothed_value',
+                         hue='split', ax=axs[i], palette=['c', 'm'], alpha=1)
         g.set(title=title_txt)
         g.get_legend().set_title(None)
 

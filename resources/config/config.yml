@@ -13,25 +13,25 @@ data:
       notSame_pctl: .2
       exclude_pctl: .8
     sameness:
-      flat_neural_bin_sz__grid: [.05, .02]
+      flat_neural_bin_sz: .05
       triplet_min_prevalence: 5
       normalize_neural: True
 
 model:
-  dim__grid: [5, 4]
-  dropout__grid: [.5, .75]
+  dim: 3
+  dropout: 0.75
 
 training:
   cv:
     folds: 3
   progress_mgr_params:
-    patience: .1
-    overfit: 0.15
+    patience: null
+    overfit: 100
     converge: 1.e-4
   epochs: 100
-  batch_size: 64
+  batch_size: 32
   epoch_size_factor: .25
   loss_margin: 1.0
   optim_params:
-    kind__grid: [SGD, Adam]
-    lr__grid: [1.e-3, 1.e-4, 1.e-2]
+    kind: Adam
+    lr: 5.e-05

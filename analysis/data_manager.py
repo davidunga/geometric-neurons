@@ -64,7 +64,12 @@ class DataMgr:
         serieses = [d.stack() for d in neural_data]
         df = pd.concat(serieses, axis=1)
         df.index = [f'{col_name}.{index}' for index, col_name in df.index]
-        return df.T
+        df = df.T
+        n_bins, n_neurons = neural_data[0].shape
+        assert df.shape[1] == n_bins * n_neurons
+        assert df.shape[0] == len(segmets)
+        print(f"Neural data segment size = ({n_neurons} neurons) x ({n_bins} bins) = {df.shape[1]} flat bins.")
+        return df
 
     @verbolize()
     def load_sameness(self) -> tuple[SamenessData, SymmetricPairsData, list[Segment]]:

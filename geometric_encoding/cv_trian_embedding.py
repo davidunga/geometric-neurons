@@ -30,31 +30,61 @@ class CvModelsManager:
         return paths.MODELS_DIR / f'{cfg_token}.{fold_token}.pth'
 
     @staticmethod
-    def get_model_files(cfg: Config = None, fold: int = None) -> list[str]:
-        return glob(CvModelsManager.make_model_file_path(cfg="*" if cfg is None else cfg,
-                                                         fold="*" if fold is None else fold).as_posix())
+    def get_model_files(cfg: Config = None, fold: int = None) -> list[Path]:
+        return ostools.ls(CvModelsManager.make_model_file_path(
+            cfg="*" if cfg is None else cfg, fold="*" if fold is None else fold), aspath=True)
 
     @staticmethod
-    def get_tensorboard_dir_for_model(model_hint) -> Path:
-        model_name = CvModelsManager.model_file_from_hint(model_hint).stem
-        tbdir = paths.TENSORBOARD_DIR / model_name
-        assert tbdir.is_dir()
-        return tbdir
+    def get_tensorboard_dirs_from_hint(hint) -> list[Path]:
+        model_files = CvModelsManager.model_files_from_hint(hint)
+        tbdirs = []
+        for model_file in model_files:
+            tbdir = paths.TENSORBOARD_DIR / model_file.stem
+            assert tbdir.is_dir()
+            tbdirs.append(tbdir)
+        return tbdirs
 
     @staticmethod
-    def model_file_from_hint(model_hint: str | tuple[Config, int] | tuple[str, int]) -> Path:
-        if isinstance(model_hint, tuple):
-            files = CvModelsManager.get_model_files(*model_hint)
-            assert len(files) == 1
-            return Path(files[0])
-        for option in [Path(model_hint), paths.MODELS_DIR / model_hint, paths.MODELS_DIR / (model_hint + '.pth')]:
-            if option.is_file():
-                return option
-        raise ValueError(f"Unable to find model file for {model_hint}")
+    def model_files_from_hint(hint) -> list[Path]:
+        # model hints:
+        # (wildcard to) file path
+        # (wildcard to) full name
+        # (wildcard to) basename + fold
+        # sort_by + rank
+
+        if isinstance(hint, (str, Path)):
+            # wildcard to name or filepath
+            for maybe in [hint, paths.MODELS_DIR / hint, paths.MODELS_DIR / (hint + '.pth')]:
+                files = ostools.ls(maybe, aspath=True)
+                if files:
+                    return files
+            raise ValueError(f"Unable to find model file for {hint}")
+
+        assert isinstance(hint, (list, tuple))
+        assert len(hint) == 2
+
+        is_sort_by = isinstance(hint[0], str) and " " not in hint[0]
+        if is_sort_by:
+            # (sort_by, rank)
+            sort_by, ranks = hint
+            agg_df = CvModelsManager.get_aggregated_results(sort_by=sort_by)
+            if isinstance(ranks, int):
+                ranks = [ranks]
+            files = []
+            for rank in ranks:
+                row = agg_df.iloc[rank]
+                file = CvModelsManager.get_model_files(row['base_name'])[0]
+                files.append(file)
+            return files
+        else:
+            # should be (cfg, fold) or (name, fold)
+            return CvModelsManager.get_model_files(*hint)
 
     @staticmethod
     def improvement_scores(model_hint, win_size = .9) -> dict[str, float]:
-        tbdir = CvModelsManager.get_tensorboard_dir_for_model(model_hint)
+        tbdir = CvModelsManager.get_tensorboard_dirs_from_hint(model_hint)
+        assert len(tbdir) == 1
+        tbdir = tbdir[0]
         df = dlutils.load_tensorboard_as_df(tbdir, smooth_sigma=3)
         scores = {}
         for dir_name in df['dir_name'].unique():
@@ -82,11 +112,13 @@ class CvModelsManager:
             status, meta = CvModelsManager.get_meta_and_training_status(model_file)
             if status != 'complete':
                 continue
-            imprv_scores = CvModelsManager.improvement_scores(Path(model_file).stem)
+            create_time = ostools.stats(model_file)['create'].strftime("%Y-%m-%d %H:%M")
+            imprv_scores = CvModelsManager.improvement_scores(model_file.stem)
             imprv_scores = {f'improve.{k.lower()}': v for k, v in imprv_scores.items()}
             train_stop = '{stop_reason} [epoch {stop_epoch}]'.format(**meta['train_status'])
-            items.append({"file": model_file, "base_name": meta["base_name"], "train_stop": train_stop,
-                          "fold": meta["fold"], "cfg": meta["cfg"], **meta["val"], **imprv_scores})
+            items.append({"time": create_time, "file": str(model_file), "base_name": meta["base_name"],
+                          "train_stop": train_stop, "fold": meta["fold"], "cfg": meta["cfg"], **meta["val"],
+                          **imprv_scores})
         df = pd.DataFrame.from_records(items)
         variance_cfgs = dictools.variance_dicts([item["cfg"] for item in items])
         grid_df = pd.DataFrame.from_records(variance_cfgs)
@@ -96,7 +128,7 @@ class CvModelsManager:
         df.drop(columns=['train_stop'], inplace=True)
         if not full:
             metric_cols = [col for col in df.columns if df[col].dtype.kind == 'f' and not col.startswith("improve")]
-            df = df[["base_name", "fold", "stop_epochs", "stop_reason", "improve.loss_val"] + metric_cols]
+            df = df[["time", "base_name", "fold", "stop_epochs", "stop_reason", "improve.loss_val"] + metric_cols]
         df = pd.concat([df, grid_df], axis=1)
         return df
 
@@ -104,15 +136,16 @@ class CvModelsManager:
     def get_aggregated_results(sort_by: str = 'mean_auc'):
         catalog_df = CvModelsManager.get_catalog()
         grid_cols = [col for col in catalog_df.columns if col.startswith("grid")]
-        nonmetric_cols = ["base_name", "fold", "stop_epochs", "stop_reason"] + grid_cols
+        nonmetric_cols = ["time", "base_name", "fold", "stop_epochs", "stop_reason"] + grid_cols
         metric_cols = [col for col in catalog_df.columns if col not in nonmetric_cols]
         items = []
         for base_name in catalog_df['base_name'].unique():
             rows = catalog_df[catalog_df['base_name'] == base_name]
             stop_epochs = rows['stop_epochs'].to_numpy()
             max_epochs = stop_epochs.max()
+            time_for_max_epochs = rows['time'].iloc[np.argmax(stop_epochs)]
             stop_reason_for_max_epochs = rows['stop_reason'].iloc[np.argmax(stop_epochs)]
-            item = {'base_name': base_name, 'fold_count': len(rows),
+            item = {'time': time_for_max_epochs, 'base_name': base_name, 'fold_count': len(rows),
                     'max_epochs': max_epochs, 'stop_reason': stop_reason_for_max_epochs}
             for col in metric_cols:
                 metric_values = rows[col].to_numpy()
@@ -193,6 +226,11 @@ def single_fold_train(cfg: Config, fold: int, sameness_data: Optional[SamenessDa
         val_sameness = sameness_data.copy(shuffled_items[n_train_items:])
 
     model = LinearEmbedder(input_size=sameness_data.X.shape[1], **cfg.model)
+
+    print("Model:")
+    print(model)
+    print("\n")
+
     triplet_train(train_sameness=train_sameness, val_sameness=val_sameness, model=model, model_file=model_file,
                   tensorboard_dir=tensorboard_dir, **dictools.modify_dict(cfg.training, exclude=['cv'], copy=True))
 
@@ -242,48 +280,55 @@ def cv_train(skip_existing: bool = True, cfg_before_folds: bool = True):
             CvModelsManager.refresh_results_file()
 
 
-def plot_tensorboard(model_name_or_ranks: str | int | Iterable, score_by: str = None):
+def plot_tensorboard(model_hints):
     from common.utils import dlutils
     from common.utils import ostools
     import matplotlib.pyplot as plt
     import json
 
-    if not isinstance(model_name_or_ranks, Iterable):
-        model_name_or_ranks = [model_name_or_ranks]
+    # model hints:
+    # file path
+    # full name
+    # basename + fold
+    # scoreby + rank
 
-    agg_results_df = CvModelsManager.get_aggregated_results(sort_by=score_by)
+    # if not isinstance(model_name_or_ranks, Iterable):
+    #     model_name_or_ranks = [model_name_or_ranks]
+    #
+    # agg_results_df = CvModelsManager.get_aggregated_results(sort_by=score_by)
+    #
+    # for model_name_or_rank in model_name_or_ranks:
+    #     if isinstance(model_name_or_rank, int):
+    #         rank = model_name_or_rank
+    #     else:
+    #         assert isinstance(model_name_or_rank, str)
+    #         rank = None
+    #         for i in range(len(agg_results_df)):
+    #             if model_name_or_rank.startswith(agg_results_df.iloc[i]['base_name']):
+    #                 assert rank is None
+    #                 rank = i
+    #         assert isinstance(rank, int)
+    #
+    #     row = agg_results_df.iloc[rank]
+    #     model_name = str(row['base_name'])
+    #
+    #     txt = f"max_epochs={row['max_epochs']}, stop_reason={row['stop_reason']} "
+    #     txt += json.dumps({k.replace('grid.', ''): v for k, v in row.to_dict().items() if k.startswith('grid')})
+    #
+    #     tbdirs = ostools.ls(paths.TENSORBOARD_DIR / (model_name + '*'))
 
-    for model_name_or_rank in model_name_or_ranks:
-        if isinstance(model_name_or_rank, int):
-            rank = model_name_or_rank
-        else:
-            assert isinstance(model_name_or_rank, str)
-            rank = None
-            for i in range(len(agg_results_df)):
-                if model_name_or_rank.startswith(agg_results_df.iloc[i]['base_name']):
-                    assert rank is None
-                    rank = i
-            assert isinstance(rank, int)
-
-        row = agg_results_df.iloc[rank]
-        model_name = str(row['base_name'])
-
-        txt = f"max_epochs={row['max_epochs']}, stop_reason={row['stop_reason']} "
-        txt += json.dumps({k.replace('grid.', ''): v for k, v in row.to_dict().items() if k.startswith('grid')})
-
-        tbdirs = ostools.ls(paths.TENSORBOARD_DIR / (model_name + '*'))
-        for tbdir in tbdirs:
-            dlutils.plot_tensorboard(tbdir, title_suffix='' if rank is None else f'[{rank}]', txt=txt)
+    tbdirs = CvModelsManager.get_tensorboard_dirs_from_hint(model_hints)
+    for tbdir in tbdirs:
+        dlutils.plot_tensorboard(tbdir)
 
     plt.show()
 
 
 
 if __name__ == "__main__":
-    tbdir = '/Users/davidu/tensorboard/geometric-neurons/TP_RJ bin10 lag100 dur200 procAffine 0e3ad3.Fold0'
-    tbdir = '/Users/davidu/tensorboard/geometric-neurons/TP_RJ bin10 lag100 dur200 procAffine 69a457.Fold1'
-
+    #plot_tensorboard(('time', 0))
     #plot_tensorboard(range(0,6), score_by='mean_improve.loss_val')
-
-    CvModelsManager.refresh_results_file(sort_by='mean_improve.loss_val')
-    #cv_train()
+    #plot_tensorboard(('TP_RJ bin10 lag100 dur200 procAffine 010fea', 0))
+    #CvModelsManager.refresh_results_file(sort_by='mean_improve.loss_val')
+    #CvModelsManager.refresh_results_file(sort_by='time')
+    cv_train()

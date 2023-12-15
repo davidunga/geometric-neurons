@@ -47,7 +47,8 @@ def variance_dicts(dicts: list[dict], flat: bool = True):
     flat_dicts = [flatten_dict(d) for d in dicts]
     df = pd.DataFrame.from_records(flat_dicts)
     variance_flat_keys = [col for col in df.columns if not _is_unique(df[col])]
-    variance_dicts = [{k: d[k] for k in variance_flat_keys} for d in flat_dicts]
+    variance_dicts = [{k: v for k, v in d.items() if k in variance_flat_keys}
+                      for d in flat_dicts]
     if not flat:
         variance_dicts = [unflatten_dict(d) for d in variance_dicts]
     return variance_dicts
