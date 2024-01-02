@@ -29,7 +29,7 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         self._triplet_min_prevalence = triplet_min_prevalence
         self._same_counts = same_counts
         self._notSame_counts = notSame_counts
-        self._triplet_sampling_proba = None
+        self._triplet_sampling_rate = None
         self._triplet_participating_items = None
 
     def copy(self, include_items: Container = None):
@@ -52,12 +52,29 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
                             same_counts=same_counts,
                             notSame_counts=notSame_counts)
 
-    def init_triplet_sampling(self):
-        counts = self.prevalence_counts()
-        self._triplet_sampling_proba = np.divide(1, counts, out=np.zeros_like(counts, float), where=counts != 0)
-        self._triplet_sampling_proba /= self._triplet_sampling_proba.sum()
-        assert len(counts) == len(self._triplet_sampling_proba) == self.n
-        self._triplet_participating_items = np.nonzero(counts)[0]
+    def init_triplet_sampling(self, participating_items: Sequence[int] = None):
+
+        min_counts = np.zeros(self.n, int)
+        max_counts = np.zeros(self.n, int)
+        for item in range(self.n):
+            min_counts[item], max_counts[item] = self.same_counts.get(item, 0), self.notSame_counts.get(item, 0)
+            if min_counts[item] > max_counts[item]:
+                min_counts[item], max_counts[item] = max_counts[item], min_counts[item]
+
+        allowed_to_participate = min_counts >= self._triplet_min_prevalence
+        if participating_items is not None:
+            assert allowed_to_participate[participating_items].all(), \
+                "Some of the specified 'participating items' are not allowed to participate"
+        else:
+            participating_items = np.nonzero(allowed_to_participate)[0]
+
+        self._triplet_participating_items = participating_items
+        self._triplet_sampling_rate = np.zeros(self.n, float)
+        self._triplet_sampling_rate[max_counts > 0] = 1 / max_counts[max_counts > 0]
+        self._triplet_sampling_rate /= self._triplet_sampling_rate.sum()
+
+        assert np.all(self._triplet_sampling_rate[self._triplet_participating_items] > 0)
+        assert len(min_counts) == len(self._triplet_sampling_rate) == self.n
 
     @property
     def triplet_participating_items(self) -> NpVec[int]:
@@ -70,7 +87,7 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
     @classmethod
     @verbolize()
     def from_sameness_sign(cls, sameness: Sequence, X: ArrayLike, *args, **kwargs):
-        n = symmetric_pairs.num_items(len(sameness))
+        n = len(X)
         sameness = sameness[sameness != 0]
         sameness[sameness == -1] = SamenessData._NOTSAME
         sameness[sameness == 1] = SamenessData._SAME
@@ -94,17 +111,9 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
             self._notSame_counts = Counter(self.item_pairs(label=SamenessData._NOTSAME).flatten().tolist())
         return self._notSame_counts
 
-    def prevalence_counts(self) -> NpVec[int]:
-        both_counts = np.zeros((self.n, 2), int)
-        for item in range(self.n):
-            both_counts[item] = self.same_counts.get(item, 0), self.notSame_counts.get(item, 0)
-        counts = both_counts.max(axis=1)
-        counts[both_counts.min(axis=1) < self._triplet_min_prevalence] = 0
-        return counts
-
     def sample_triplet_items(self, anchors: int | Sequence[int], rand_seed: int = None):
 
-        assert self._triplet_sampling_proba is not None, "Triplet sampling not initialized"
+        assert self._triplet_sampling_rate is not None, "Triplet sampling not initialized"
         assert self.triplet_participating_items is not None, "Triplet sampling not initialized"
 
         rng = np.random.default_rng(rand_seed)
@@ -114,7 +123,8 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
 
         def _sample(item_partners):
             assert len(item_partners)
-            cumulative_proba = np.cumsum(self._triplet_sampling_proba[item_partners])
+            cumulative_proba = np.cumsum(self._triplet_sampling_rate[item_partners])
+            assert np.all(cumulative_proba > 0)
             cumulative_proba /= cumulative_proba[-1]
             i = np.searchsorted(cumulative_proba, rng.random())
             return item_partners[i]
@@ -134,6 +144,16 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         P = self.X[positives]
         N = self.X[negatives]
         return A, P, N
+
+    def summary(self):
+        from common.utils import strtools
+        print("Participating items: " + strtools.part(self.triplet_participating_n, self.num_items()))
+        groups = self.pairs['group'][self.pairs[['item1', 'item2']].isin(self.triplet_participating_items).any(axis=1)]
+        n_same = np.sum(groups == SamenessData._SAME)
+        n_notSame = np.sum(groups == SamenessData._NOTSAME)
+        print(f"Participating pairs: Total={n_same + n_notSame},"
+              f" Same={strtools.part(n_same, n_same + n_notSame)},"
+              f" notSame={strtools.part(n_notSame, n_same + n_notSame)}")
 
 
 def calc_triplet_loss(p_dists: NDArray, n_dists: NDArray, margin: float = 1.) -> float:
@@ -157,11 +177,13 @@ class SamenessEval:
 
     def __init__(self,
                  sameness: SamenessData,
-                 n_samples: int = 1000,
+                 n_samples_max: int = 1000,
                  kind: str = "triplet",
                  triplet_margin: float = 1.):
 
-        assert n_samples % 2 == 0
+        n_samples = min(n_samples_max, sameness.triplet_participating_n)
+        if n_samples % 2 != 0:
+            n_samples -= 1
 
         self.sameness = sameness
         self.triplet_margin = triplet_margin

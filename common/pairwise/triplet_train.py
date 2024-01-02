@@ -23,7 +23,8 @@ def triplet_train(
         tensorboard_dir: Path = None,
         progress_mgr_params: dict = None,
         checkpoint_every: int = 5,
-        warm_start_mode: Literal["never", "allow", "always"] = "always"
+        warm_start_mode: Literal["never", "allow", "always"] = "always",
+        base_meta: dict = None
 ):
 
     _DBG_RUN = False
@@ -41,15 +42,20 @@ def triplet_train(
 
     # ------
 
-    def _add_to_tensborboard(eval_results: dict[str, SamenessEval]):
+    def _add_to_tensborboard(eval_results: dict[str, SamenessEval], epoch: int):
         if tb is None: return
         for metric in ('loss', 'auc', 'tscore'):
             tb.add_scalars(metric.capitalize(), {name: getattr(eval_res, metric)
                                                  for name, eval_res in eval_results.items()}, epoch)
 
-    def _save_model(model_file: Path):
-        dlutils.checkpoint.dump(model_file, model, optimizer, meta={
-            'epoch': epoch, 'train_status': progress_mgr.status_dict, 'val': val_eval.results_dict()})
+    def _save_model(model_file: Path, epoch: int):
+        meta = {
+            'epoch': epoch,
+            'train_status': progress_mgr.status_dict,
+            'val': val_eval.results_dict(),
+            **(base_meta if base_meta else {})
+        }
+        dlutils.checkpoint.dump(model_file, model, optimizer, meta)
 
     # ------
 
@@ -94,21 +100,16 @@ def triplet_train(
     model.train()
 
     train_sameness.to(device=device, dtype=torch.float32)
-    train_sameness.init_triplet_sampling()
+    print("Train:")
+    train_sameness.summary()
     train_eval = SamenessEval(sameness=train_sameness)
 
     val_sameness.to(device=device, dtype=torch.float32)
-    val_sameness.init_triplet_sampling()
+    print("Val:")
+    val_sameness.summary()
     val_eval = SamenessEval(sameness=val_sameness)
 
     triplet_loss = torch.nn.TripletMarginLoss(margin=loss_margin)
-
-    if progress_mgr_params:
-        progress_mgr = dlutils.ProgressManager(**progress_mgr_params, epochs=epochs)
-    else:
-        progress_mgr = dlutils.ProgressManager(patience=None, epochs=epochs)
-
-    tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
 
     if _DBG_RUN:
         print(" !!! DEBUG RUN !!! ")
@@ -118,8 +119,20 @@ def triplet_train(
         n_pairs_ballpark = train_sameness.triplet_participating_n * (train_sameness.triplet_participating_n - 1) // 2
         batches_in_epoch = int(epoch_size_factor * n_pairs_ballpark / batch_size)
 
+    if progress_mgr_params:
+        progress_mgr = dlutils.ProgressManager(**progress_mgr_params, epochs=epochs)
+    else:
+        progress_mgr = dlutils.ProgressManager(patience=None, epochs=epochs)
+
+    tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
+
     batcher = dlutils.BatchManager(batch_size=batch_size, items=list(train_sameness.triplet_participating_items),
                                    batches_in_epoch=batches_in_epoch)
+
+    train_eval.evaluate(embedder=model)
+    val_eval.evaluate(embedder=model)
+    _add_to_tensborboard(dict(train=train_eval, val=val_eval), epoch=-1)
+    _save_model(model_ckeckpt_file, epoch=-1)
 
     for epoch in range(start_epoch, epochs):
         epoch_start_t = time()
@@ -136,17 +149,17 @@ def triplet_train(
         val_eval.evaluate(embedder=model)
 
         print(f' ({time() - epoch_start_t:2.1f}s) Train: {train_eval} Val: {val_eval}', end='')
-        _add_to_tensborboard(dict(train=train_eval, val=val_eval))
+        _add_to_tensborboard(dict(train=train_eval, val=val_eval), epoch=epoch)
 
         progress_mgr.process(val_eval.loss, train_eval.loss, val_eval.auc, epoch=epoch)
         print(' ' + progress_mgr.report(), end='')
 
         if epoch % checkpoint_every == 0 or progress_mgr.should_stop:
-            _save_model(model_ckeckpt_file)
+            _save_model(model_ckeckpt_file, epoch=epoch)
             print(' [Chckpt]', end='')
 
         if progress_mgr.is_new_best:
-            _save_model(model_temp_file)
+            _save_model(model_temp_file, epoch=epoch)
             print(' [Saved]', end='')
 
         print('')

@@ -43,7 +43,8 @@ class NpDataFrame:
         assert (win_sz is None) ^ (bin_sz is None)
         if bin_sz is not None:
             win_sz = int(.5 + bin_sz / self.bin_size)
-            assert abs(win_sz - bin_sz / self.bin_size) < 1e-6, "bin_sz must be an integer multiply of current bin size"
+            assert abs(win_sz - bin_sz / self.bin_size) < .2, f"bin_sz must be an integer multiply of current bin " \
+                                                              f"size. got={bin_sz / self.bin_size} instead of {win_sz}"
         values = reduce_rows(self[:], win_sz, 'mean')
         t = None if self._t is None else reduce_rows(self._t, win_sz, 'mean')
         return type(self)(pd.DataFrame(values, columns=self.columns), aliases=self._aliases, meta=self._meta, t=t)
@@ -59,16 +60,15 @@ class NpDataFrame:
     def __len__(self) -> int:
         return self.shape[0]
 
-    def __getitem__(self, items: (str, list[str])) -> np.typing.NDArray:
-        if isinstance(items, slice):
-            assert items == slice(None, None, None)
-            colnames = self.columns
+    def __getitem__(self, items) -> np.typing.NDArray:
+        if isinstance(items, slice) or (isinstance(items, tuple) and isinstance(items[0], slice)):
+            return self._df[self.columns].to_numpy().squeeze()[items]
         else:
             colnames = []
             for item in (items if isinstance(items, list) else [items]):
                 col = self._aliases.get(item, item)
                 colnames += col if isinstance(col, list) else [col]
-        return self._df[colnames].to_numpy().squeeze()
+            return self._df[colnames].to_numpy().squeeze()
 
     def __getattr__(self, item):
         return self.__getitem__(item)
@@ -87,7 +87,14 @@ class NpDataFrame:
 
     @property
     def bin_size(self) -> float:
-        return UniformGrid.from_samples(self.t).dt
+        dt = (self.t[-1] - self.t[0]) / (len(self.t) - 1)
+
+        # -- validate uniformity:
+        dts = np.diff(self.t)
+        assert np.abs(dt - dts).max() < 1e-5 * dt
+        # --
+
+        return dt
 
     def time2index(self, tm: float) -> int:
         return np.searchsorted(self.t, tm)

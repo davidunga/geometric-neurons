@@ -47,47 +47,88 @@ Structure:
 
 # -----------------------
 
+from pathlib import Path
 import numpy as np
-from motorneural.data import Trial, Data, DatasetMeta
+from motorneural.data import Trial, Data, DatasetMeta, postprocess_neural
 from motorneural.neural import NeuralData, PopulationSpikeTimes
 from motorneural.motor import KinData, kinematics
 from scipy.io import loadmat
-import os
 import re
 from motorneural.typetools import Callable
 
 # -----------------------
 
-_DATASETS = {
-    "TP_RS": {"file": "rs1050211_clean_spikes_SNRgt4.mat", "task": "TP", "monkey": "RS"},
-    "TP_RJ": {"file": "r1031206_PMd_MI_modified_clean_spikesSNRgt4.mat", "task": "TP", "monkey": "RJ"},
-    "CO_01": {"file": "rs1050225_clean_SNRgt4.mat", "task": "CO", "monkey": "RS"},
-    "CO_02": {"file": "rs1051013_clean_SNRgt4.mat", "task": "CO", "monkey": "RS"}
+HATSO_DATASET_SPECS = {
+    "TP_RS": {
+        "file": "rs1050211_clean_spikes_SNRgt4.mat",
+        "task": "TP",
+        "monkey": "RS",
+        "sites": ["m1"],
+        "trials_blacklist": [2, 92, 151, 167, 180, 212, 244, 256,
+                             325, 415, 457, 508, 571, 662, 686, 748]
+    },
+    "TP_RS_PMD": "auto",
+    "TP_RJ": {
+        "file": "r1031206_PMd_MI_modified_clean_spikesSNRgt4.mat",
+        "task": "TP",
+        "monkey": "RJ",
+        "sites": ["m1"],
+        "trials_blacklist": [4, 10, 30, 43, 44, 46, 53, 66, 71, 78, 79, 84, 85, 91, 106,
+                             107, 118, 128, 141, 142, 145, 146, 163, 165, 172, 173, 180,
+                             185, 203, 209, 210, 245, 254, 260, 267, 270, 275, 278, 281,
+                             283, 288, 289, 302, 313, 314, 321, 326, 340, 350, 363, 364,
+                             366, 383, 385, 386, 390, 391]
+    },
+    "CO_RS_01": {
+        "file": "rs1050225_clean_SNRgt4.mat",
+        "task": "CO",
+        "monkey": "RS",
+        "sites": ["m1"],
+        "trials_blacklist": []
+    },
+    "CO_RS_02": {
+        "file": "rs1051013_clean_SNRgt4.mat",
+        "task": "CO",
+        "monkey": "RS",
+        "sites": ["m1"],
+        "trials_blacklist": []
+    }
 }
 
-# -----------------------
-
-HATSO_DATASETS = list(_DATASETS.keys())
-
-
-class HatsoData(Data):
-
-    def __init__(self, trials, meta):
-        super().__init__(trials, meta)
-
-    @classmethod
-    def make(cls, data_dir: str, dataset: str, lag: float, bin_sz: float,
-             kin_fnc: Callable[None, KinData] = None, max_trials: int = None):
-        return _load_data(data_dir, dataset, lag, bin_sz, kin_fnc, max_trials)
+HATSO_DATASET_SPECS["TP_RS_PMD"] = HATSO_DATASET_SPECS["TP_RS"].copy()
+HATSO_DATASET_SPECS["TP_RS_PMD"]["sites"] = ["pmd"]
 
 # -----------------------
 
 
-def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
-               kin_fnc: Callable[None, KinData] = None, max_trials: int = None) -> HatsoData:
+def make_hatso_data(data_dir: Path, dataset: str, lag: float, bin_sz: float) -> Data:
+    specs = HATSO_DATASET_SPECS[dataset]
+    meta = DatasetMeta(
+        file=str(data_dir / specs["file"]),
+        name=dataset,
+        task=specs["task"],
+        monkey=specs["monkey"],
+        sites=set(specs["sites"])
+    )
+    trials = load_trials(meta=meta, lag=lag, bin_sz=bin_sz, kin_fnc=kinematics,
+                         trials_blacklist=specs["trials_blacklist"])
+    trials = postprocess_neural(trials)
+    data = Data(trials=trials, meta=meta)
+    return data
+
+
+def load_trials(meta: DatasetMeta,
+                lag: float,
+                bin_sz: float, smooth_dur: (str, float) = 'auto',
+                kin_fnc: Callable[None, KinData] = None,
+                trials_blacklist: list[int] = None,
+                max_trials: int = None) -> list[Trial]:
 
     if kin_fnc is None:
         kin_fnc = kinematics
+
+    if smooth_dur == 'auto':
+        smooth_dur = bin_sz
 
     assert np.abs(lag) <= 1, f"Extreme lag value: {lag}. Make sure its in seconds."
     assert 0 < bin_sz <= 1, f"Extreme bin size value: {bin_sz}. Make sure its in seconds."
@@ -123,24 +164,31 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
 
     def _get_neural_data(raw):
         """ Get neuron spikes times and info """
-        chans = list(raw['MIchans'].squeeze())
-        if 'PMdchans' in raw:
-            chans += list(raw['PMdchans'].squeeze())
+
+        site_of_chan = {}  # dict channel index -> site name
+        for chan_ in raw.get('MIchans', np.array([])).squeeze():
+            site_of_chan[chan_] = 'm1'
+        for chan_ in raw.get('PMdchans', np.array([])).squeeze():
+            site_of_chan[chan_] = 'pmd'
+
         neuron_spktimes = {}
         neuron_info = {}
         for k in sorted(list(k for k in raw.keys() if k.startswith('Chan'))):
             assert re.match("Chan[0-9]{3}[a-z]{1}", k) is not None
-            neuron_name = k[4:]
             neuron_chan = int(k[4:-1])
+            site = site_of_chan[neuron_chan]
+            if site not in meta.sites:
+                continue
+            neuron_name = k[4:]
             neuron_spktimes[neuron_name] = np.real(raw[k].flatten())
-            neuron_info[neuron_name] = {'site': 'm1' if neuron_chan in raw['MIchans'] else 'pmd'}
+            neuron_info[neuron_name] = {'site': site}
         assert len(neuron_spktimes) > 0
         return PopulationSpikeTimes(neuron_spktimes), neuron_info
 
     # ----------
     # core:
 
-    raw_ = loadmat(os.path.expanduser(data_dir) + "/" + _DATASETS[dataset]["file"])
+    raw_ = loadmat(meta.file)
 
     # full kinematics:
     X = np.stack([raw_['x'][:, 1], raw_['y'][:, 1]], axis=1)
@@ -154,24 +202,31 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
                               _get_TP_events_and_properies(raw_))
 
     trials = []
-    for ix, (tr_event_tms, tr_properties) in enumerate(zip(events_tms, properties)):
+    for raw_ix, (tr_event_tms, tr_properties) in enumerate(zip(events_tms, properties)):
+
+        if raw_ix in trials_blacklist:
+            continue
 
         if max_trials is not None and len(trials) == max_trials:
             break
 
+        st = np.ceil(tr_event_tms["st"] / bin_sz) * bin_sz
+        end = np.floor((tr_event_tms["end"] - lag) / bin_sz) * bin_sz
+
         # trial skeleton:
-        tr = Trial(dataset=dataset, ix=ix, lag=lag, bin_sz=bin_sz)
+        tr = Trial(dataset=meta.name, ix=len(trials), lag=lag, bin_sz=bin_sz)
 
         # add neural data:
         st = np.ceil(tr_event_tms["st"] / bin_sz) * bin_sz
         end = np.floor((tr_event_tms["end"] - lag) / bin_sz) * bin_sz
-        tr.neural = NeuralData.from_spike_times(spktimes=population_spktimes.get_time_slice([st, end]),
-                                                fs=1 / bin_sz, tlims=(st, end), neuron_info=neuron_info)
+        tr.neural = NeuralData.from_spike_times(
+            spktimes=population_spktimes.get_time_slice([st, end]), fs=1 / bin_sz, tlims=(st, end),
+            neuron_info=neuron_info, smooth_dur=smooth_dur)
 
         # add kinematic data:
         ifm, ito = np.searchsorted(t, [st + lag, end + lag])
         ifm, ito = max(0, ifm - 1), min(len(t), ito + 1)
-        tr.kin = kin_fnc(X[ifm: ito], t[ifm: ito], dst_t=tr.neural.t + lag, dx=.5)
+        tr.kin = kin_fnc(X[ifm: ito], t[ifm: ito], dst_t=tr.neural.t + lag, dx=.5, smooth_dur=smooth_dur)
 
         # add events and properties:
         tr_event_tms["max_spd"] = tr.kin.t[np.argmax(tr.kin["EuSpd"])]
@@ -183,34 +238,21 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
 
         trials.append(tr)
 
-    # normalize spike counts per neuron:
-    spikecounts = np.concatenate([tr.neural[:] for tr in trials], axis=0)
-    assert spikecounts.shape[1] == trials[0].neural.num_neurons
-    mu = np.mean(spikecounts, axis=0)
-    sd = np.maximum(np.std(spikecounts, axis=0), np.finfo(float).eps)
-    for tr in trials:
-        tr.neural._df -= mu
-        tr.neural._df /= sd
-
-    # ---
-    # sanity-
-    # properties that are suppose to be the same for all trials:
-    assert all([tr.neural.neuron_info == trials[0].neural.neuron_info for tr in trials])
-    assert all([tr.dataset == trials[0].dataset for tr in trials])
-    assert all([tr.lag == trials[0].lag for tr in trials])
-    assert all([tr.bin_sz == trials[0].bin_sz for tr in trials])
-    # verify indices:
-    assert [tr.ix for tr in trials] == list(range(len(trials)))
-    # verify equal number of neural and kinematic samples, in each trial:
-    assert all([len(tr.neural) == len(tr.kin) for tr in trials])
-    # ---
-
     sites = set([v['site'] for v in trials[0].neural.neuron_info.values()])
-    meta = DatasetMeta(**{**{"name": dataset, "sites": sites}, **_DATASETS[dataset]})
-
-    return HatsoData(trials, meta)
+    return trials
 
 
 if __name__ == "__main__":
-    data = HatsoData.make("~/data/hatsopoulos", "TP_RS", lag=.1, bin_sz=.01)
+    name = "TP_RS"
+    specs = DATASET_SPECS[name]
+    meta = DatasetMeta(
+        file = str(Path("~/data/hatsopoulos") / specs["file"]),
+        name = name,
+        task = specs["task"],
+        monkey = specs["monkey"],
+        sites = set(specs["sites"])
+    )
+    trials_blacklist = specs["trials_blacklist"]
+    data = HatsoDataFactory(meta=meta, lag=.01, bin_sz=.05, kin_fnc=kinematics,
+                            trials_blacklist=trials_blacklist).make()
 

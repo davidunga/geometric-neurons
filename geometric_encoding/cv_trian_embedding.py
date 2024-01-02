@@ -120,10 +120,12 @@ class CvModelsManager:
                           "train_stop": train_stop, "fold": meta["fold"], "cfg": meta["cfg"], **meta["val"],
                           **imprv_scores})
         df = pd.DataFrame.from_records(items)
+        if not len(df):
+            return df
         variance_cfgs = dictools.variance_dicts([item["cfg"] for item in items])
         grid_df = pd.DataFrame.from_records(variance_cfgs)
         grid_df.rename(columns={c: f'grid.{c}' for c in grid_df.columns}, inplace=True)
-        df["stop_epochs"] = [int(s[-4:-1]) for s in df['train_stop']]
+        df["stop_epochs"] = [int(s.split(' ')[-1][:-1]) for s in df['train_stop']]
         df["stop_reason"] = [s.split(' [')[0] for s in df['train_stop']]
         df.drop(columns=['train_stop'], inplace=True)
         if not full:
@@ -135,6 +137,8 @@ class CvModelsManager:
     @staticmethod
     def get_aggregated_results(sort_by: str = 'mean_auc'):
         catalog_df = CvModelsManager.get_catalog()
+        if not len(catalog_df):
+            return catalog_df
         grid_cols = [col for col in catalog_df.columns if col.startswith("grid")]
         nonmetric_cols = ["time", "base_name", "fold", "stop_epochs", "stop_reason"] + grid_cols
         metric_cols = [col for col in catalog_df.columns if col not in nonmetric_cols]
@@ -168,7 +172,7 @@ class CvModelsManager:
             f.write(catalog_df.to_string())
 
     @staticmethod
-    def get_meta_and_training_status(model_file: PathLike, train_time_tol: float = 1800.):
+    def get_meta_and_training_status(model_file: PathLike, train_time_tol: float = 7200.):
         if Path(model_file).is_file():
             meta = checkpoint.get_meta(model_file)
             if meta["train_status"]["done"]:
@@ -220,10 +224,12 @@ def single_fold_train(cfg: Config, fold: int, sameness_data: Optional[SamenessDa
         val_sameness = None
     else:
         assert fold in range(cfg.training.cv.folds)
-        shuffled_items = np.random.default_rng(fold).permutation(np.arange(sameness_data.n))
-        n_train_items = int((len(sameness_data) / cfg.training.cv.folds) ** .5)
-        train_sameness = sameness_data.copy(shuffled_items[:n_train_items])
-        val_sameness = sameness_data.copy(shuffled_items[n_train_items:])
+        sameness_data.init_triplet_sampling()
+        shuffled_items = np.random.default_rng(fold).permutation(sameness_data.triplet_participating_items)
+        n_val_items = int(len(shuffled_items) / cfg.training.cv.folds)
+        val_sameness = sameness_data.copy()
+        val_sameness.init_triplet_sampling(shuffled_items[:n_val_items])
+        sameness_data.init_triplet_sampling(shuffled_items[n_val_items:])
 
     model = LinearEmbedder(input_size=sameness_data.X.shape[1], **cfg.model)
 
@@ -231,10 +237,10 @@ def single_fold_train(cfg: Config, fold: int, sameness_data: Optional[SamenessDa
     print(model)
     print("\n")
 
-    triplet_train(train_sameness=train_sameness, val_sameness=val_sameness, model=model, model_file=model_file,
-                  tensorboard_dir=tensorboard_dir, **dictools.modify_dict(cfg.training, exclude=['cv'], copy=True))
-
-    checkpoint.update_meta(model_file, base_name=cfg.str(), fold=fold, cfg=cfg.__dict__)
+    base_meta = dict(base_name=cfg.str(), fold=fold, cfg=cfg.__dict__)
+    triplet_train(train_sameness=sameness_data, val_sameness=val_sameness, model=model, model_file=model_file,
+                  tensorboard_dir=tensorboard_dir, **dictools.modify_dict(cfg.training, exclude=['cv'], copy=True),
+                  base_meta=base_meta)
 
     return result
 
@@ -247,6 +253,11 @@ def cv_train(skip_existing: bool = True, cfg_before_folds: bool = True):
     """
 
     cfgs = [cfg for cfg in Config.yield_from_grid()]
+    # ds = dictools.variance_dicts([cfg.__dict__ for cfg in cfgs[:6]])
+    # for i, cfg in enumerate(cfgs):
+    #     print(cfg.str(), ds[i])
+    # return
+
     max_folds = max([cfg.training.cv.folds for cfg in cfgs])
 
     CvModelsManager.refresh_results_file()
@@ -274,6 +285,7 @@ def cv_train(skip_existing: bool = True, cfg_before_folds: bool = True):
         print(f"cfg {cfg_ix + 1}/{len(cfgs)}, fold {fold}:", end=" ")
         result = single_fold_train(cfg=cfgs[cfg_ix], fold=fold,
                                    sameness_data=sameness_data, skip_existing=skip_existing)
+
         sameness_data = result['sameness_data']
         if not result['skipped']:
             print("Results so far: \n" + CvModelsManager.get_catalog(full=False).to_string() + "\n")

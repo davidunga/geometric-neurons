@@ -55,8 +55,8 @@ class SymmetricPairsData:
         if pairs is not None:
             self.pairs = pairs
         else:
-            self.pairs = pd.DataFrame.from_records([(None, item1, item2) for (item1, item2) in iter_pairs(self.n)],
-                                                   columns=['group', 'item1', 'item2'])
+            self.pairs = pd.DataFrame(data=iter_pairs(self.n), columns=['item1', 'item2'])
+            self.pairs['group'] = None
             if group_by is None:
                 if data is None:
                     self.pairs['group'] = self._no_group
@@ -115,6 +115,10 @@ class SymmetricPairsData:
 
     def data_of_item(self, item, label=None) -> pd.DataFrame:
         return self.data.loc[self.indexes_of_item(item, label)]
+
+    @property
+    def data_columns(self):
+        return self.data.columns
 
     def __getitem__(self, item):
         return self.data[item]

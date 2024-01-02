@@ -5,7 +5,7 @@ Handles processing and storing neural information
 from copy import deepcopy
 
 import pandas as pd
-
+from scipy.ndimage import gaussian_filter1d
 from motorneural.typetools import *
 from motorneural.uniformly_sampled import UniformGrid
 import numpy as np
@@ -100,13 +100,18 @@ class NeuralData(NpDataFrame):
                          fs: float,
                          spktimes: PopulationSpikeTimes,
                          tlims: tuple[float, float],
-                         neuron_info: dict[str, dict] = None):
+                         neuron_info: dict[str, dict] = None,
+                         smooth_dur: float = 0):
         dt = 1 / fs
         if tlims is None:
             tms = spktimes.population_spktimes()[0]
             tlims = (tms[0] - dt, tms[-1] + dt)
         time_grid = UniformGrid(dt)
         data = spktimes.spike_counts(bin_edges=time_grid.get_ticks(tlims, margin=True))
+        if smooth_dur > 0:
+            smooth_sigma = smooth_dur * fs
+            data = {neuron_name: gaussian_filter1d(binned_counts, sigma=smooth_sigma, axis=0, mode='mirror') for
+                    neuron_name, binned_counts in data.items()}
         df = pd.DataFrame.from_dict(data)
         return cls(df, meta=neuron_info, t=time_grid.get_ticks(tlims, margin=False)[:-1])
 

@@ -141,7 +141,8 @@ class Verbolize:
     def __init__(self):
         self.level = 0
         self.indent_size = 2
-        self.times_stack = []
+        self.stack = []
+        self.verbose = 1
 
     def __call__(self, *args, **kwargs):
         return self._verbolize(*args, **kwargs)
@@ -150,19 +151,43 @@ class Verbolize:
         def decorator(func):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
-                if verbose > 0:
-                    self.times_stack.append(time())
-                    print(f"{self.level * self.indent_size * ' '}{func.__name__} start")
-                self.level += 1
+                self.verbose = verbose
+                self.open(name=func.__name__)
                 result = func(*args, **kwargs)
-                self.level -= 1
-                if verbose > 0:
-                    dt = time() - self.times_stack[-1]
-                    self.times_stack.pop()
-                    print(f"{self.level * self.indent_size * ' '}{func.__name__} done. [{dt:2.4f}s]")
+                self.close()
                 return result
             return wrapper
         return decorator
+
+    def indent_print(self, *args, **kwargs):
+        print(self.level * self.indent_size * ' ', end='')
+        print(*args, **kwargs)
+
+    def open(self, name: str, inline: bool = False):
+        self.stack.append((name, time(), inline))
+        if self.verbose:
+            if not inline:
+                self.indent_print(name + " start")
+            else:
+                self.indent_print(name, end="... ")
+        self.level += 1
+
+    def close(self):
+        t = time()
+        name, start_t, inline = self.stack.pop()
+        self.level -= 1
+        if self.verbose:
+            dt = t - start_t
+            if not inline:
+                self.indent_print(f"{name} done. [{dt:2.4f}s]")
+            else:
+                print(f"done. [{dt:2.4f}s]")
+
+    def inform(self, *args, **kwargs):
+        self.indent_print(*args, **kwargs)
+
+    def alert(self, *args, **kwargs):
+        self.indent_print("!", *args, **kwargs)
 
 
 verbolize = Verbolize()

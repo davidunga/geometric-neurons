@@ -15,6 +15,7 @@ class planar:
     def to_homogeneous(R: NpMatrix, t=0.0) -> NpMatrix:
         planar._check_mtx(R)
         if R.shape == (3, 3):
+            assert t == 0
             return R
         A = np.eye(3)
         A[:2, :2] = R
@@ -23,12 +24,14 @@ class planar:
 
     @staticmethod
     def build(b=1.0, ang=0.0, t=0.0, reflect: str = 'none') -> NpMatrix:
-        cos, sin = np.cos(np.radians(ang)), np.sin(np.radians(ang))
-        R = b * np.array([[cos, -sin], [sin, cos]])
+        c = b * np.cos(np.radians(ang))
+        s = b * np.sin(np.radians(ang))
+        A = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
         if reflect != 'none':
             assert reflect in ('x', 'y')
-            R[int(reflect == 'y')] *= -1
-        return planar.to_homogeneous(R, t)
+            A[int(reflect == 'y')] *= -1
+        A[:2, -1] = t
+        return A
 
     @staticmethod
     def apply(A: NpMatrix, X: NpPoints) -> NpPoints:
@@ -93,5 +96,6 @@ def _pad_to_homogeneous(X):
 
 
 if __name__ == "__main__":
-    A = planar.build(b=1, ang=0, t=0, reflect='x')
+    A = planar.build(b=2, ang=0, t=0, reflect='none')
     print(A)
+    print(planar.apply(A, np.array([1, 1]).reshape(1,-1)))

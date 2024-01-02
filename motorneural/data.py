@@ -4,6 +4,8 @@ from motorneural.neural import NeuralData
 from motorneural.motor import KinData
 from dataclasses import dataclass, field
 import numpy as np
+from sklearn.decomposition import PCA
+import pandas as pd
 
 # ----------------------------------
 
@@ -17,36 +19,6 @@ class DatasetMeta:
     sites: Set[str]
     file: str
 
-#
-# @dataclass
-# class DataDef:
-#
-#     name: str
-#     bin_sz: float
-#     lag: float
-#     seg_dur: float = None
-#     seg_radcurv_bounds: tuple[float, float] = None
-#     proc_kind: str = None
-#
-#     @property
-#     def level(self) -> str:  # 'data'/'segments'/'dists'
-#         lvl = int(self.seg_dur is not None) + int(self.proc_kind is not None)
-#         return ('data', 'segments', 'dists')[lvl]
-#
-#     def __str__(self) -> str:
-#         return getattr(self, f'{self.level}_str')()
-#
-#     def data_str(self) -> str:
-#         return f"{self.name} bin{round(1000 * self.bin_sz):d} lag{round(1000 * self.lag):d}"
-#
-#     def segments_str(self) -> str:
-#         return f"{self.data_str()} dur{round(1000 * self.seg_dur)}"
-#
-#     def dists_str(self) -> str:
-#         return f"{self.segments_str()} proc{self.proc_kind.capitalize()}"
-#
-#     def __eq__(self, other):
-#         return self.__dict__ == other.__dict__
 
 
 @dataclass
@@ -66,18 +38,21 @@ class Segment:
     trial_ix: int = None
     kin: KinData = None
     neural: NeuralData = None
+    neural_pc: NeuralData = None
     uid: str = 'auto'
 
     def __post_init__(self):
-        assert len(self.kin) == len(self.neural)
+        assert len(self.kin) == len(self.neural) == len(self.neural_pc)
         assert np.isclose(self.kin.duration, self.neural.duration)
+        assert np.isclose(self.kin.duration, self.neural_pc.duration)
         if self.uid == 'auto':
             self.uid = f"{self.trial_ix:03d}-{self.kin.t.mean():06.2f}"
 
     def get_slice(self, *args):
         kin = self.kin.get_slice(*args)
         neural = self.neural.get_slice(*args)
-        return Segment(trial_ix=self.trial_ix, kin=kin, neural=neural)
+        neural_pc = self.neural_pc.get_slice(*args)
+        return Segment(trial_ix=self.trial_ix, kin=kin, neural=neural, neural_pc=neural_pc)
 
     def __len__(self):
         return len(self.kin)
@@ -85,6 +60,14 @@ class Segment:
     @property
     def duration(self) -> float:
         return self.kin.duration
+
+    def __getitem__(self, item: str):
+        if '.' in item:
+            attr, field = item.split('.')
+            ret = getattr(self, attr)[field]
+        else:
+            ret = getattr(self, item)
+        return ret
 
 
 @dataclass
@@ -97,6 +80,7 @@ class Trial:
     bin_sz: float
     kin: KinData = None
     neural: NeuralData = None
+    neural_pc: NeuralData = None
 
     _properties: dict[str, Any] = field(default_factory=dict)
     _events: dict[str, Event] = field(default_factory=dict)
@@ -104,7 +88,8 @@ class Trial:
     def get_segment(self, *args):
         kin = self.kin.get_slice(*args)
         neural = self.neural.get_slice(*args)
-        return Segment(trial_ix=self.ix, kin=kin, neural=neural)
+        neural_pc = self.neural_pc.get_slice(*args)
+        return Segment(trial_ix=self.ix, kin=kin, neural=neural, neural_pc=neural_pc)
 
     @property
     def duration(self):
@@ -192,10 +177,6 @@ class Data:
     @property
     def meta(self) -> DatasetMeta:
         return self._meta
-    #
-    # @property
-    # def datadef(self) -> DataDef:
-    #     return self._trials[0].datadef
 
     @property
     def lag(self) -> float:
@@ -233,3 +214,45 @@ class Data:
     def __getattr__(self, item):
         return self._meta.__getattribute__(item)
 
+
+# -------------
+
+def postprocess_neural(trials: list[Trial], max_neural_pcs: int = 10,
+                       drop_static_neurons: bool = True, normalize_neural: bool = True) -> list[Trial]:
+    eps_ = 1e-6
+
+    # normalize spike counts per neuron:
+    spikecounts = np.concatenate([tr.neural[:] for tr in trials], axis=0)
+    assert spikecounts.shape[1] == trials[0].neural.num_neurons
+    mu = np.mean(spikecounts, axis=0)
+    sd = np.std(spikecounts, axis=0)
+
+    if drop_static_neurons:
+        neurons_mask = sd > eps_
+        mu = mu[neurons_mask]
+        sd = sd[neurons_mask]
+        zero_variance_neurons = [col for i, col in enumerate(trials[0].neural.columns) if not neurons_mask[i]]
+        for tr in trials:
+            tr.neural._df.drop(columns=zero_variance_neurons, inplace=True)
+
+    if normalize_neural:
+        for tr in trials:
+            tr.neural._df -= mu
+            tr.neural._df /= sd
+
+        # validate:
+        spikecounts = np.concatenate([tr.neural[:] for tr in trials], axis=0)
+        assert np.abs(spikecounts.mean(axis=0)).max() < eps_
+        assert np.abs(np.std(spikecounts, axis=0) - 1.0).max() < eps_
+
+    # make neural PCs:
+    pca = PCA(n_components=max_neural_pcs)
+    pca.fit(spikecounts)
+    meta = {'explained_variance_ratio': pca.explained_variance_ratio_,
+            'explained_variance': pca.explained_variance_}
+    pc_names = [f'pc{i + 1}' for i in range(pca.n_components)]
+    for tr in trials:
+        df = pd.DataFrame(data=pca.transform(tr.neural[:]), columns=pc_names)
+        tr.neural_pc = NeuralData(df=df, meta=meta, t=tr.neural.t.copy())
+
+    return trials

@@ -1,25 +1,30 @@
 data:
     base:
-      name: TP_RJ
+      name: TP_RS
       bin_sz: .01
       lag: .1
     segments:
       dur: .2
       radcurv_bounds: [.2, 5]
     pairing:
-      proc_kind: affine
-      dist: proc_dist
-      same_pctl: .1
+      variable: kin.X
+      metric__grid: [affine, ortho]
+      same_pctl: .05
       notSame_pctl: .2
       exclude_pctl: .8
-    sameness:
-      flat_neural_bin_sz: .05
+      max_pairs: 100000
+      balance: True
+    predictor:
+      variable: neural
+      bin_sz: .05
+      normalize: True
       triplet_min_prevalence: 5
-      normalize_neural: True
+      shuffle: False
+
 
 model:
-  dim: 3
-  dropout: 0.75
+  dim__grid: [7, 3]
+  dropout__grid: [0.75]
 
 training:
   cv:
@@ -28,10 +33,10 @@ training:
     patience: null
     overfit: 100
     converge: 1.e-4
-  epochs: 100
+  epochs: 50
   batch_size: 32
-  epoch_size_factor: .25
+  epoch_size_factor: .2
   loss_margin: 1.0
   optim_params:
     kind: Adam
-    lr: 5.e-05
+    lr__grid: [5.e-04, 5.e-05]

@@ -1,7 +1,7 @@
 """
 Motor and kinematic data processing + containers
 """
-import numpy as np
+from scipy.ndimage.filters import gaussian_filter1d
 import pandas as pd
 from motorneural.npdataframe import NpDataFrame
 from motorneural.typetools import *
@@ -104,7 +104,7 @@ def numdrv(X: NpPoints, t: NpVec, n=1) -> list[NpPoints]:
     return drvs
 
 
-def kinematics(X: NpPoints, t: NpVec, dst_t: NpVec, dx: float = None):
+def kinematics(X: NpPoints, t: NpVec, dst_t: NpVec, dx: float = None, smooth_dur: float = 0):
 
     # ----
     # defaults
@@ -124,6 +124,12 @@ def kinematics(X: NpPoints, t: NpVec, dst_t: NpVec, dx: float = None):
     # ----
 
     crv = gk.spcurve_factory.make_numeric_curve(X=X, t=t, dx=dx, dst_t=dst_t)
+
+    if smooth_dur > 0:
+        smooth_sigma = smooth_dur * fs
+        X_smooth = gaussian_filter1d(crv.pos(dst_t), sigma=smooth_sigma, axis=0, mode='mirror')
+        crv = gk.spcurve_factory.NumericCurve(X_smooth, dst_t)
+
     invars = gk.invariants.geometric_invariants(crv)
 
     t = dst_t

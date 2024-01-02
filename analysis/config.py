@@ -16,7 +16,7 @@ _configs_grid = yaml.safe_load((paths.CONFIG_DIR / 'config.yml').open())
 
 # fields that were added to configs, and their default values
 # used for backward compatibility in terms of hash and data structure
-_ADDED_FIELDS_AND_DEFAULTS = {"data.sameness.normalize_neural": False}
+_ADDED_FIELDS_AND_DEFAULTS = {"data.sameness.normalize_neural": False, "data.base.kin_as_neural": False}
 
 
 @dataclass(init=False)
@@ -93,7 +93,7 @@ class DataConfig(Munch):
         if level == DataConfig.SEGMENTS:
             return s
         assert level == DataConfig.PAIRING
-        s += f" proc{self.pairing.proc_kind.capitalize()}"
+        s += " pair" + f"{self.pairing.variable} {self.pairing.metric}".replace(".", "").title().replace(" ", "")
         return s
 
 

@@ -8,3 +8,9 @@
 outputs/models/
 
 outputs/cv/
+
+outputs/deprecated/dep_dec-22-2023/models/
+
+outputs/deprecated/dep_dec-22-2023/cv/
+
+*.csv

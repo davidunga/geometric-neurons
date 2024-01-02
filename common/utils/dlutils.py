@@ -3,6 +3,7 @@ import pandas as pd
 import torch
 from common.utils.typings import *
 from dataclasses import dataclass
+from common.utils import ostools
 import numpy as np
 
 
@@ -237,6 +238,28 @@ class BatchManager:
         return self.epoch_items[start: stop]
 
 
+
+from datetime import timedelta, datetime
+
+
+class TrainingLifeSign:
+    def __init__(self, log_dir: PathLike, training_id: str, tolerance: (float, timedelta) = 10.):
+        self.tolerance = timedelta(seconds=tolerance) if isinstance(tolerance, float) else tolerance
+        self.log_file = Path(log_dir) / (training_id + ".lifeSign")
+        self.last_refresh = datetime(year=1970, month=1, day=1)
+        if self.log_file.is_file():
+            self.last_refresh = datetime.fromtimestamp(ostools.stats(self.log_file)['modify'])
+
+    def time_since_last_seen(self) -> timedelta:
+        return datetime.now() - self.last_refresh
+
+    def is_alive(self) -> bool:
+        return self.time_since_last_seen() <= self.tolerance
+
+    def refresh(self):
+        self.log_file.touch()
+
+
 def load_tensorboard_as_df(tbdir: PathLike, smooth_sigma: float = 2) -> pd.DataFrame:
     import tbparse
     from scipy.ndimage import gaussian_filter1d
@@ -251,6 +274,8 @@ def load_tensorboard_as_df(tbdir: PathLike, smooth_sigma: float = 2) -> pd.DataF
     df['smoothed_value'] = smoothed
 
     return df
+
+
 
 
 
@@ -402,4 +427,5 @@ def plot_tensorboard(tbdir: PathLike, stat_win_size: int = 10, title_suffix: str
 
 
 if __name__ == "__main__":
-    pass
+    plot_tensorboard("/Users/davidu/tensorboard/geometric-neurons/TP_RS bin10 lag100 dur200 pairKinxOrtho 7c9931.Fold0")
+    plt.show()
