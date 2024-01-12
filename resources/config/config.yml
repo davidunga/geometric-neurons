@@ -28,6 +28,7 @@ model:
 
 training:
   cv:
+    rand_seed: 0
     folds: 3
   progress_mgr_params:
     patience: null

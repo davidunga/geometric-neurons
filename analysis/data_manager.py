@@ -43,6 +43,14 @@ class DataMgr:
         pairs = pickle.load(self.pkl_path(DataConfig.PAIRING).open('rb'))
         verbolize.close()
 
+        seg_ids = list(set(pairs['seg1']).union(pairs['seg2']))
+        n_vals = int(.1 * len(seg_ids))
+        val_segs = np.random.default_rng(0).permutation(seg_ids)[:n_vals]
+        val_counts = pairs[['seg1', 'seg2']].isin(val_segs).sum(axis=1)
+
+        val_pairs = val_counts == 2
+        train_pairs = val_counts == 0
+
         if 'proc_dist_rank' not in pairs.data:
             pairs.data['proc_dist_rank'] = pairs.data['proc_dist'].argsort().argsort()
             pickle.dump(pairs, self.pkl_path(DataConfig.PAIRING).open('wb'))
@@ -129,6 +137,7 @@ class DataMgr:
         sameness_data = SamenessData.from_sameness_sign(
             X=self.get_predictor_df(segments), sameness=pairs['sameness'],
             triplet_min_prevalence=self.cfg.predictor.triplet_min_prevalence)
+
         return sameness_data, pairs, segments
 
     @staticmethod
@@ -139,6 +148,19 @@ class DataMgr:
             uids = pairs.data_of_item(seg_ix)[['seg1', 'seg2']].values
             assert np.all(np.sum(uids == segments[seg_ix].uid, axis=1) == 1)
 
-    def get_pairing_X(self, segments: list[Segment]):
-        return [s[self.cfg.data.pairing.variable][:, :2] for s in segments]
+    # def get_pairing_X(self, segments: list[Segment]):
+    #     return [s[self.cfg.data.pairing.variable][:, :2] for s in segments]
 
+    @verbolize
+    @staticmethod
+    def split_sameness_by_fold(sameness_data: SamenessData, fold: int, n_folds: int = None, shuff_seed: int = 0):
+        if fold == -1:
+            return sameness_data, None
+        assert fold in range(n_folds)
+        val_start = int(sameness_data.n * fold / n_folds)
+        val_stop = int(round(sameness_data.n * (fold + 1) / n_folds))
+        val_items = np.random.default_rng(shuff_seed).permutation(sameness_data.n)[val_start: val_stop]
+        mutex_groups = sameness_data.mutex_indexes(val_items)
+        sameness_data_2 = sameness_data.modcopy(index_mask=mutex_groups == 1)
+        sameness_data = sameness_data.modcopy(index_mask=mutex_groups == 2)
+        return sameness_data, sameness_data_2

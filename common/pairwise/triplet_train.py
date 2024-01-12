@@ -7,6 +7,7 @@ from common.utils import dlutils
 from common.pairwise.sameness import SamenessData, SamenessEval
 from common.utils.devtools import progbar
 from common.utils.typings import *
+from common.utils.devtools import verbolize
 
 
 def triplet_train(
@@ -100,13 +101,15 @@ def triplet_train(
     model.train()
 
     train_sameness.to(device=device, dtype=torch.float32)
-    print("Train:")
-    train_sameness.summary()
+    print("Train triplets:")
+    train_sameness.init_triplet_sampling(lazy=True)
+    train_sameness.triplet_summary()
     train_eval = SamenessEval(sameness=train_sameness)
 
     val_sameness.to(device=device, dtype=torch.float32)
-    print("Val:")
-    val_sameness.summary()
+    print("Val triplets:")
+    val_sameness.init_triplet_sampling(lazy=True)
+    val_sameness.triplet_summary()
     val_eval = SamenessEval(sameness=val_sameness)
 
     triplet_loss = torch.nn.TripletMarginLoss(margin=loss_margin)
@@ -116,8 +119,8 @@ def triplet_train(
         epochs = start_epoch + 3
         batches_in_epoch = 5
     else:
-        n_pairs_ballpark = train_sameness.triplet_participating_n * (train_sameness.triplet_participating_n - 1) // 2
-        batches_in_epoch = int(epoch_size_factor * n_pairs_ballpark / batch_size)
+        n_pairs = train_sameness.triplet_samplable_indexes_mask.to_numpy().sum()
+        batches_in_epoch = int(epoch_size_factor * n_pairs / batch_size)
 
     if progress_mgr_params:
         progress_mgr = dlutils.ProgressManager(**progress_mgr_params, epochs=epochs)
@@ -126,7 +129,7 @@ def triplet_train(
 
     tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
 
-    batcher = dlutils.BatchManager(batch_size=batch_size, items=list(train_sameness.triplet_participating_items),
+    batcher = dlutils.BatchManager(batch_size=batch_size, items=list(train_sameness.triplet_anchors),
                                    batches_in_epoch=batches_in_epoch)
 
     train_eval.evaluate(embedder=model)

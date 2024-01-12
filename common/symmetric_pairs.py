@@ -131,6 +131,18 @@ class SymmetricPairsData:
             self._num_items = len(self.item_set())
         return self._num_items
 
+    def mutex_indexes(self, split_items: Container[int]) -> NpVec[int]:
+        """ returns a labels vector,
+            1 = both pair items are members of split_items
+            2 = both pair items are not members of split_items
+            0 = pair is mixed
+        """
+        split1_counts = self.pairs[['item1', 'item2']].isin(split_items).sum(axis=1)
+        split_labels = np.zeros(len(split1_counts), int)
+        split_labels[split1_counts == 2] = 1
+        split_labels[split1_counts == 0] = 2
+        return split_labels
+
 
 def example():
 

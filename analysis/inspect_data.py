@@ -79,7 +79,7 @@ def show_triplets(cfg: Config = None):
     dists = pairs['proc_dist']
 
     sameness.init_triplet_sampling()
-    sameness.summary()
+    sameness.triplet_summay()
 
     anchors = list(sameness.triplet_participating_items)[:500]
     anchors, positives, negatives = sameness.sample_triplet_items(anchors, rand_seed=0)

@@ -10,6 +10,7 @@ from sklearn import metrics
 from scipy import stats
 from copy import deepcopy
 from common.utils.devtools import verbolize
+from common.utils import strtools
 
 
 class SamenessData(symmetric_pairs.SymmetricPairsData):
@@ -30,14 +31,18 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         self._same_counts = same_counts
         self._notSame_counts = notSame_counts
         self._triplet_sampling_rate = None
-        self._triplet_participating_items = None
+        self._triplet_anchors = None
 
-    def copy(self, include_items: Container = None):
-
-        pairs = self.pairs.copy()
+    def modcopy(self, include_items: Container[int] = None, index_mask: Sequence[bool] = None):
+        """ make modified copy """
 
         if include_items is not None:
-            pairs.loc[~pairs[['item1', 'item2']].isin(include_items).all(axis=1), 'group'] = None
+            assert index_mask is None
+            index_mask = self.mutex_indexes(split_items=include_items) == 1
+
+        pairs = self.pairs.copy()
+        if index_mask is not None:
+            pairs.loc[~index_mask, 'group'] = None
             same_counts = None
             notSame_counts = None
         else:
@@ -52,7 +57,10 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
                             same_counts=same_counts,
                             notSame_counts=notSame_counts)
 
-    def init_triplet_sampling(self, participating_items: Sequence[int] = None):
+    def init_triplet_sampling(self, anchors: Sequence[int] = None, lazy: bool = False):
+
+        if lazy and self._triplet_sampling_is_initialized:
+            return
 
         min_counts = np.zeros(self.n, int)
         max_counts = np.zeros(self.n, int)
@@ -61,28 +69,41 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
             if min_counts[item] > max_counts[item]:
                 min_counts[item], max_counts[item] = max_counts[item], min_counts[item]
 
-        allowed_to_participate = min_counts >= self._triplet_min_prevalence
-        if participating_items is not None:
-            assert allowed_to_participate[participating_items].all(), \
-                "Some of the specified 'participating items' are not allowed to participate"
+        can_be_anchor = min_counts >= self._triplet_min_prevalence
+        if anchors is not None:
+            assert can_be_anchor[anchors].all(), "Some of the specified anchors do not have sufficient counts"
         else:
-            participating_items = np.nonzero(allowed_to_participate)[0]
+            anchors = np.nonzero(can_be_anchor)[0]
 
-        self._triplet_participating_items = participating_items
+        # index of pairs that are reachable through achors, i.e., are anchors or pairs of an anchor
+        is_reachable = self.pairs.loc[self.pairs['group'].notna(), ['item1', 'item2']].isin(anchors).any(axis=1)
+        reachable_indexes = is_reachable[is_reachable].index
+
+        # count how many times each item can be reached (=potentially sampled)
+        reachable_counts = np.zeros(self.n, int)
+        for item, count in Counter(self.pairs.loc[reachable_indexes, ['item1', 'item2']].to_numpy().flatten()).items():
+            reachable_counts[item] = count
+
+        # set the sampling rate inversely-proportional to the count
         self._triplet_sampling_rate = np.zeros(self.n, float)
-        self._triplet_sampling_rate[max_counts > 0] = 1 / max_counts[max_counts > 0]
+        self._triplet_sampling_rate[reachable_counts > 0] = 1 / reachable_counts[reachable_counts > 0]
         self._triplet_sampling_rate /= self._triplet_sampling_rate.sum()
 
-        assert np.all(self._triplet_sampling_rate[self._triplet_participating_items] > 0)
+        self._triplet_anchors = anchors
+        assert np.all(self._triplet_sampling_rate[self._triplet_anchors] > 0)
         assert len(min_counts) == len(self._triplet_sampling_rate) == self.n
 
     @property
-    def triplet_participating_items(self) -> NpVec[int]:
-        return self._triplet_participating_items
+    def triplet_anchors(self) -> NpVec[int]:
+        return self._triplet_anchors
 
     @property
-    def triplet_participating_n(self) -> int:
-        return len(self._triplet_participating_items)
+    def triplet_samplable_items(self) -> NpVec[int]:
+        return np.nonzero(self._triplet_sampling_rate)[0]
+
+    @property
+    def triplet_samplable_indexes_mask(self):
+        return self.pairs.loc[:, ['item1', 'item2']].isin(self.triplet_samplable_items).all(axis=1)
 
     @classmethod
     @verbolize()
@@ -111,15 +132,18 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
             self._notSame_counts = Counter(self.item_pairs(label=SamenessData._NOTSAME).flatten().tolist())
         return self._notSame_counts
 
+    @property
+    def _triplet_sampling_is_initialized(self):
+        return self._triplet_sampling_rate is not None and self._triplet_anchors is not None
+
     def sample_triplet_items(self, anchors: int | Sequence[int], rand_seed: int = None):
 
-        assert self._triplet_sampling_rate is not None, "Triplet sampling not initialized"
-        assert self.triplet_participating_items is not None, "Triplet sampling not initialized"
+        assert self._triplet_sampling_is_initialized, "Triplet sampling not initialized"
 
         rng = np.random.default_rng(rand_seed)
 
         if isinstance(anchors, int):
-            anchors = self.triplet_participating_items[rng.integers(self.triplet_participating_n, size=anchors)]
+            anchors = self._triplet_anchors[rng.integers(len(self._triplet_anchors), size=anchors)]
 
         def _sample(item_partners):
             assert len(item_partners)
@@ -132,6 +156,7 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         positives = []
         negatives = []
         for anchor in anchors:
+            assert anchor in self._triplet_anchors
             partners_of_anchor = self.partners_of_item(anchor)
             positives.append(_sample(partners_of_anchor[SamenessData._SAME]))
             negatives.append(_sample(partners_of_anchor[SamenessData._NOTSAME]))
@@ -145,15 +170,11 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         N = self.X[negatives]
         return A, P, N
 
-    def summary(self):
-        from common.utils import strtools
-        print("Participating items: " + strtools.part(self.triplet_participating_n, self.num_items()))
-        groups = self.pairs['group'][self.pairs[['item1', 'item2']].isin(self.triplet_participating_items).any(axis=1)]
-        n_same = np.sum(groups == SamenessData._SAME)
-        n_notSame = np.sum(groups == SamenessData._NOTSAME)
-        print(f"Participating pairs: Total={n_same + n_notSame},"
-              f" Same={strtools.part(n_same, n_same + n_notSame)},"
-              f" notSame={strtools.part(n_notSame, n_same + n_notSame)}")
+    def triplet_summary(self):
+        print("Samplable items:", strtools.part(len(self.triplet_samplable_items), self.n))
+        groups = self.pairs.loc[self.triplet_samplable_indexes_mask, 'group']
+        print("Participating pairs:", strtools.parts(Same=np.sum(groups == SamenessData._SAME),
+                                                     notSame=np.sum(groups == SamenessData._NOTSAME)))
 
 
 def calc_triplet_loss(p_dists: NDArray, n_dists: NDArray, margin: float = 1.) -> float:
@@ -177,13 +198,10 @@ class SamenessEval:
 
     def __init__(self,
                  sameness: SamenessData,
-                 n_samples_max: int = 1000,
+                 n_samples: int = 1000,
                  kind: str = "triplet",
-                 triplet_margin: float = 1.):
-
-        n_samples = min(n_samples_max, sameness.triplet_participating_n)
-        if n_samples % 2 != 0:
-            n_samples -= 1
+                 triplet_margin: float = 1.,
+                 rand_seed: int = 0):
 
         self.sameness = sameness
         self.triplet_margin = triplet_margin
@@ -195,7 +213,8 @@ class SamenessEval:
         if self.kind == "pair":
             self.items, self.is_same = zip(*sameness.labeled_pairs())
         elif self.kind == "triplet":
-            a, p, n = sameness.sample_triplet_items(anchors=n_samples // 2, rand_seed=0)
+            assert n_samples % 2 == 0
+            a, p, n = sameness.sample_triplet_items(anchors=n_samples // 2, rand_seed=rand_seed)
             self.items = [(aa, pp) for aa, pp in zip(a, p)] + [(aa, nn) for aa, nn in zip(a, n)]
             self.is_same = np.arange(len(self.items)) < len(p)
 
