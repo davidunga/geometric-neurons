@@ -1,6 +1,14 @@
 import numpy as np
 
 
+def attribs_string(obj) -> str:
+    if hasattr(obj, '__dict__'):
+        obj = obj.__dict__
+    s = [f"{k}: {v}" for k, v in obj.items()]
+    s = "\n".join(s)
+    return s
+
+
 def parts(**kwargs) -> str:
     total = sum(kwargs.values())
     tokens = [f"Total={total}"]

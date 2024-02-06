@@ -2,15 +2,36 @@
 Dictionary tools
 """
 
-from itertools import product
+from itertools import product, chain
 from copy import deepcopy
 from typing import Callable
-
 import numpy as np
 import pandas as pd
 
 
 def unpack_nested_dict(d: dict) -> tuple[list, list]:
+    """
+    Args:
+        d: nest dict
+    Returns:
+        key_paths: list of key paths
+        values: list same length as key_paths, values[i] is the value of key_paths[i]
+    Example:
+        d = {
+            'Alice': {'city': 'LA', 'id': 123},
+            'Bob': {'city': 'NY', 'id': 567}
+        }
+        ->
+        key_paths:
+            [
+                ['Alice', 'city'],
+                ['Alice', 'id'],
+                ['Bob', 'city'],
+                ['Bob', 'id']
+            ]
+        values:
+            ['LA', 123, 'NY', 567]
+    """
     key_paths = []
     values = []
     for key, value in d.items():
@@ -24,21 +45,33 @@ def unpack_nested_dict(d: dict) -> tuple[list, list]:
     return key_paths, values
 
 
-def dict_product_from_grid(d: dict, grid_suffix: str = '__grid'):
-    d = flatten_dict(d)
-    new_d = {}
-    for k, v in d.items():
-        if k.endswith(grid_suffix):
-            assert isinstance(v, list)
-            new_d[k[:-len(grid_suffix)]] = v
-        else:
-            new_d[k] = [v]
-    for d in dict_product(new_d):
-        yield unflatten_dict(d)
+def dict_product_from_grid(grid: dict, suffix: str = ''):
+    """
+    Yield product of list values in grid dict.
+        If suffix is provided, only keys that end with suffix strings are regarded as grid points.
+        If suffix not provided, all list values are regarded as grid points.
+    """
+
+    flat_grid, sep = flatten_dict_autosep(grid)
+    rename_keys = {}
+    for k, v in flat_grid.items():
+        if suffix:
+            if k.endswith(suffix):
+                rename_keys[k] = k[:-len(suffix)]
+            else:
+                v = [v]
+        flat_grid[k] = [v] if not isinstance(v, list) else v
+    if rename_keys:
+        flat_grid = {rename_keys.get(k, k): v for k, v in flat_grid.items()}
+    for flat_dict in dict_product(flat_grid):
+        yield unflatten_dict(flat_dict, sep=sep)
 
 
-def variance_dicts(dicts: list[dict], flat: bool = True):
-    """ ignore keys where all dicts have the same value """
+def variance_dicts(dicts: list[dict], flat: bool = True, force_keep: list = None):
+    """
+        ignore keys where all dicts have the same value
+        force_keep: list of (flat) keys to keep even if non-variance
+    """
     def _is_unique(s: pd.Series):
         try:
             return len(s.unique()) == 1
@@ -46,13 +79,17 @@ def variance_dicts(dicts: list[dict], flat: bool = True):
             return len(np.unique(s.to_numpy())) == 1
     flat_dicts = [flatten_dict(d) for d in dicts]
     df = pd.DataFrame.from_records(flat_dicts)
-    variance_flat_keys = [col for col in df.columns if not _is_unique(df[col])]
+    force_keep = [] if not force_keep else force_keep
+    variance_flat_keys = [col for col in df.columns if not _is_unique(df[col]) or col in force_keep]
     variance_dicts = [{k: v for k, v in d.items() if k in variance_flat_keys}
                       for d in flat_dicts]
     if not flat:
         variance_dicts = [unflatten_dict(d) for d in variance_dicts]
     return variance_dicts
 
+
+def rename(d: dict, **kwargs) -> dict:
+    return {kwargs.get(k, k): v for k, v in d.items()}
 
 
 def modify_dict(base_dict: dict, copy: bool, exclude: list = None,
@@ -102,12 +139,25 @@ def update_nested_dict(d: dict, keys: list, val, allow_new: bool = False):
 
 
 def flatten_dict(d: dict, sep='.') -> dict:
-    """ Flatten a nest dict by concatenating nested keys """
+    """ Flatten a nested dict by concatenating nested keys """
+    flat_dict, _ = flatten_dict_autosep(d, seps=(sep,))
+    return flat_dict
+
+
+def flatten_dict_autosep(d: dict, seps=('.', ':', '|')) -> tuple[dict, str]:
+    """ Flatten a nested dict by concatenating nested keys
+        Choose first separator which does not collide with current keys
+    """
     key_paths, values = unpack_nested_dict(d)
-    for key_path in key_paths:
-        assert not any(sep in key for key in key_path)
+    all_keys_str = "".join(chain(*key_paths))
+    sep = None
+    for maybe_sep in seps:
+        if maybe_sep not in all_keys_str:
+            sep = maybe_sep
+            break
+    assert sep is not None
     flat_keys = [sep.join(key_path) for key_path in key_paths]
-    return dict(zip(flat_keys, values))
+    return dict(zip(flat_keys, values)), sep
 
 
 def unflatten_dict(d: dict, sep='.') -> dict:
@@ -133,6 +183,11 @@ def dict_recursive(d: dict, fn: Callable[[dict], dict]) -> dict:
 
 
 if __name__ == "__main__":
-    d = {"a": {"aa": [11, 12], "bb__grid": [22, 23]}, "b__grid": [2,3]}
-    for d in dict_product_from_grid(d):
+    d = {"a": {"aa": [[11, 12]], "bb.GRID": [22, 23]}, "b.GRID": [2, 3]}
+    # d = {
+    #     'Alice': {'city': 'LA', 'id': 123},
+    #     'Bob': {'city': 'NY', 'id': 567}
+    # }
+    print(unpack_nested_dict(d))
+    for d in dict_product_from_grid(d, suffix=''):
         print(d)

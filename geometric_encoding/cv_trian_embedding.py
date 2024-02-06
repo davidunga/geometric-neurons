@@ -3,6 +3,8 @@ from itertools import product
 from datetime import datetime
 import numpy as np
 import pandas as pd
+import torch.nn
+
 from analysis.config import Config
 from geometric_encoding.embedding import LinearEmbedder
 from analysis.data_manager import DataMgr
@@ -24,11 +26,27 @@ from common.utils.devtools import verbolize
 
 class TrainingMgr:
 
-    def __init__(self, cfg: Config):
-        self.cfg = cfg
+    def __init__(self,
+                 cfg: Config | dict,
+                 fold: int,
+                 dbg_run: bool = False,
+                 early_stop_epoch: int = None,
+                 exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
+                 **kwargs):
+
+        self.cfg = cfg if isinstance(cfg, Config) else Config(cfg)
+        self.fold = fold
+        self.dbg_run = dbg_run
+        self.early_stop_epoch = early_stop_epoch
+        self.exists_handling = exists_handling
+        self._kwargs = kwargs
+
+    def as_dict(self) -> dict:
+        return dict(cfg=self.cfg.__dict__, fold=self.fold, dbg_run=self.dbg_run)
 
     @verbolize()
-    def split_sameness_by_fold(self, sameness_data: SamenessData, fold: int):
+    def _split_sameness_by_fold(self, sameness_data: SamenessData):
+        fold = self.fold
         if fold == -1:
             return sameness_data, None
         assert fold in range(self.cfg.training.cv.folds)
@@ -41,102 +59,136 @@ class TrainingMgr:
         sameness_data = sameness_data.modcopy(index_mask=mutex_groups == 2)
         return sameness_data, sameness_data_2
 
+    def load_split_sameness(self) -> tuple[SamenessData, SamenessData]:
+        sameness_data, _, _ = DataMgr(self.cfg.data).load_sameness()
+        train_sameness, val_sameness = self._split_sameness_by_fold(sameness_data)
+        return train_sameness, val_sameness
+
+    def init_model(self, input_size: int) -> torch.nn.Module:
+        model = LinearEmbedder(input_size=input_size, **self.cfg.model)
+        return model
+
     @property
     def training_kws(self) -> dict:
-        return dictools.modify_dict(self.cfg.training, exclude=['cv'], copy=True)
+        kws = dictools.modify_dict(self.cfg.training, exclude=['cv'], copy=True)
+        kws.update(self._kwargs)
+        if self.early_stop_epoch:
+            assert self.early_stop_epoch <= kws['epochs']
+            kws['epochs'] = self.early_stop_epoch
+        return kws
 
-    def dispatch(self, fold: int, skip_existing: bool = True) -> bool:
+    @property
+    def model_file(self) -> Path:
+        model_file = CvModelsManager.make_model_file_path(cfg=self.cfg, fold=self.fold)
+        if self.dbg_run:
+            model_file = model_file.with_stem(model_file.stem + '.DBG')
+        return model_file
 
-        model_file = CvModelsManager.make_model_file_path(cfg=self.cfg, fold=fold)
-        tensorboard_dir = paths.TENSORBOARD_DIR / model_file.stem
+    @property
+    def tensorboard_dir(self) -> Path:
+        return paths.TENSORBOARD_DIR / self.model_file.stem
 
-        training_status = CvModelsManager.get_meta_and_training_status(model_file)[0]
-        if training_status != 'none' and skip_existing:
-            print(str(model_file), f"- SKIPPED [training {training_status}]")
-            return False
+    def dispatch(self) -> bool:
 
-        print(str(model_file), "- RUNNING")
+        model_file = self.model_file
+        tensorboard_dir = self.tensorboard_dir
 
-        sameness_data, _, _ = DataMgr(self.cfg.data).load_sameness()
-        train_sameness, val_sameness = self.split_sameness_by_fold(sameness_data, fold)
+        if model_file.is_file():
 
-        model = LinearEmbedder(input_size=train_sameness.X.shape[1], **self.cfg.model)
-        base_meta = dict(base_name=self.cfg.str(), fold=fold, cfg=self.cfg.__dict__)
-        triplet_train(train_sameness=train_sameness, val_sameness=val_sameness, model=model, model_file=model_file,
-                      tensorboard_dir=tensorboard_dir, **self.training_kws, base_meta=base_meta)
+            skip = False
+            if self.exists_handling == "skip":
+                skip = True
+            elif self.exists_handling == "warm_start":
+                completed_epochs = 0
+                try:
+                    checkpoint_meta = dlutils.SnapshotMgr(model_file).get_metas()['checkpoint']
+                    completed_epochs = checkpoint_meta['epoch']
+                except:
+                    pass
+                skip = self.training_kws['epochs'] <= (completed_epochs + 1)
+
+            if skip:
+                print(str(model_file), "SKIPPED")
+                return False
+
+        print(str(model_file), "RUNNING")
+        model_file.touch()  # mark model as exists as soon as we decide to work on it
+
+        train_sameness, val_sameness = self.load_split_sameness()
+        model = self.init_model(input_size=train_sameness.X.shape[1])
+
+        triplet_train(train_sameness=train_sameness,
+                      val_sameness=val_sameness,
+                      model=model,
+                      model_file=model_file,
+                      tensorboard_dir=tensorboard_dir,
+                      **self.training_kws,
+                      base_meta=self.as_dict(),
+                      dbg_run=self.dbg_run,
+                      exists_handling=self.exists_handling)
 
         return True
 
 
-def cv_train(skip_existing: bool = True):
+def cv_train(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
+             dbg_run: bool = False,
+             early_stop_epoch: int = None,
+             cfg_name_include: str = None,
+             cfg_name_exclude: str = None):
 
     cfgs = [cfg for cfg in Config.yield_from_grid()]
     max_folds = max([cfg.training.cv.folds for cfg in cfgs])
 
-    CvModelsManager.refresh_results_file()
+    grid_cfgs_df = pd.DataFrame.from_records(dictools.variance_dicts([cfg.__dict__ for cfg in cfgs],
+                                                                     force_keep=['data.pairing.balance']))
 
+    CvModelsManager.refresh_results_file()
     for fold in range(max_folds):
         for cfg_ix, cfg in enumerate(cfgs):
+
             if fold >= cfg.training.cv.folds:
                 continue
+            if cfg_name_include is not None and cfg_name_include not in cfg.str():
+                continue
+            if cfg_name_exclude is not None and cfg_name_exclude in cfg.str():
+                continue
 
-            print(f"cfg {cfg_ix + 1}/{len(cfgs)}, fold {fold}:", end=" ")
-            success = TrainingMgr(cfg).dispatch(fold=fold, skip_existing=skip_existing)
+            print(f"cfg {cfg_ix + 1}/{len(cfgs)}, fold {fold}:")
+            print(grid_cfgs_df.loc[cfg_ix].to_string())
 
+            training_mgr = TrainingMgr(cfg, fold=fold, dbg_run=dbg_run, early_stop_epoch=early_stop_epoch,
+                                       exists_handling=exists_handling)
+            success = training_mgr.dispatch()
             if success:
-                print("Results so far: \n" + CvModelsManager.get_catalog(full=False).to_string() + "\n")
                 CvModelsManager.refresh_results_file()
 
-#
-# def plot_tensorboard(model_hints):
-#     from common.utils import dlutils
-#     from common.utils import ostools
-#     import matplotlib.pyplot as plt
-#     import json
-#
-#     # model hints:
-#     # file path
-#     # full name
-#     # basename + fold
-#     # scoreby + rank
-#
-#     # if not isinstance(model_name_or_ranks, Iterable):
-#     #     model_name_or_ranks = [model_name_or_ranks]
-#     #
-#     # agg_results_df = CvModelsManager.get_aggregated_results(sort_by=score_by)
-#     #
-#     # for model_name_or_rank in model_name_or_ranks:
-#     #     if isinstance(model_name_or_rank, int):
-#     #         rank = model_name_or_rank
-#     #     else:
-#     #         assert isinstance(model_name_or_rank, str)
-#     #         rank = None
-#     #         for i in range(len(agg_results_df)):
-#     #             if model_name_or_rank.startswith(agg_results_df.iloc[i]['base_name']):
-#     #                 assert rank is None
-#     #                 rank = i
-#     #         assert isinstance(rank, int)
-#     #
-#     #     row = agg_results_df.iloc[rank]
-#     #     model_name = str(row['base_name'])
-#     #
-#     #     txt = f"max_epochs={row['max_epochs']}, stop_reason={row['stop_reason']} "
-#     #     txt += json.dumps({k.replace('grid.', ''): v for k, v in row.to_dict().items() if k.startswith('grid')})
-#     #
-#     #     tbdirs = ostools.ls(paths.TENSORBOARD_DIR / (model_name + '*'))
-#
-#     tbdirs = CvModelsManager.get_tensorboard_dirs_from_hint(model_hints)
-#     for tbdir in tbdirs:
-#         dlutils.plot_tensorboard(tbdir)
-#
-#     plt.show()
-#
-#
+
+def SCRIPT_cv_train_by_modifying_cfg():
+    cfg_or_rank = 0
+    dbg_run = False
+    fold = 0
+    early_stop_epoch = 20
+    exists_handling = "overwrite"
+
+    if isinstance(cfg_or_rank, int):
+        cfg, _ = CvModelsManager.get_config_and_files_by_rank(cfg_or_rank)
+    else:
+        assert isinstance(cfg_or_rank, Config)
+        cfg = Config
+
+    print("Modifying config", cfg.output_name)
+
+    # cfg.data.pairing.metric = 'rigid'
+    # training_mgr = TrainingMgr(cfg, fold=fold, dbg_run=dbg_run, early_stop_epoch=early_stop_epoch,
+    #                            exists_handling=exists_handling)
+    # success = training_mgr.dispatch()
+    # CvModelsManager.refresh_results_file()
+
 
 if __name__ == "__main__":
-    #plot_tensorboard(('time', 0))
-    #plot_tensorboard(range(0,6), score_by='mean_improve.loss_val')
-    #plot_tensorboard(('TP_RJ bin10 lag100 dur200 procAffine 010fea', 0))
-    #CvModelsManager.refresh_results_file(sort_by='mean_improve.loss_val')
-    #CvModelsManager.refresh_results_file(sort_by='time')
-    cv_train()
+    #SCRIPT_cv_train_by_modifying_cfg()
+    #CvModelsManager.get_config_and_files_by_rank(2)
+    cv_train(exists_handling="skip", dbg_run=False, early_stop_epoch=20)
+    #CvModelsManager.refresh_results_file()
+    #cv_train(exists_handling="overwrite", dbg_run=False, cfg_name_include="f2688c")
+    #cv_train(exists_handling="overwrite", dbg_run=False, cfg_name_exclude="f2688c")

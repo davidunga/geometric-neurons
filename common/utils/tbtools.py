@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from common.utils.typings import *
 from common.utils import plotting
+from torch.utils.tensorboard import SummaryWriter
+
 
 def load_tensorboard_as_df(tbdir: PathLike, smooth_sigma: float = 2) -> pd.DataFrame:
 
@@ -23,28 +25,22 @@ def load_tensorboard_as_df(tbdir: PathLike, smooth_sigma: float = 2) -> pd.DataF
     return df
 
 
+def add_counts_as_histogram(tb: SummaryWriter, counts: Sequence[int], tag: str, global_step: int = None):
+    fake_samples = []
+    for k, count in enumerate(counts):
+        fake_samples += [k] * count
+    if not fake_samples:
+        return
+    fake_samples = np.array(fake_samples)
+    bin_edges = np.arange(len(counts))
+    bin_edges[0] -= .1
+    bin_edges[-1] += .1
+    tb.add_histogram(tag, fake_samples, global_step, bins=bin_edges)
+
+
 def plot_tensorboard(tbdir: PathLike, stat_win_size: int = 10, title_suffix: str = '', txt: str = ''):
 
-    params = {'legend.fontsize': 'x-small',
-              'figure.figsize': (15, 5),
-              'axes.labelsize': 'x-small',
-              'axes.titlesize': 'small',
-              'xtick.labelsize': 'x-small',
-              'ytick.labelsize': 'x-small'}
-    pylab.rcParams.update(params)
-
-    def remove_inner_labels(axs, keep_legend: tuple | str = (0, 0)):
-        if axs.ndim == 1:
-            axs = axs.reshape(1, -1)
-        if not isinstance(keep_legend, str):
-            keep_legend = tuple([k if k >= 0 else axs.shape[i] + k for i, k in enumerate(keep_legend)])
-        for i, j in product(range(axs.shape[0]), range(axs.shape[1])):
-            if i != axs.shape[0] - 1:
-                axs[i, j].set_xlabel(None)
-            if j != 0:
-                axs[i, j].set_ylabel(None)
-            if keep_legend != 'all' and keep_legend != (i, j):
-                axs[i, j].get_legend().remove()
+    plotting.MplParams.set('small')
 
     def _text_wrap(txt: str | list, max_line_len: int = 50):
         link_chars = (':', '=')
@@ -79,30 +75,6 @@ def plot_tensorboard(tbdir: PathLike, stat_win_size: int = 10, title_suffix: str
 
         return '\n'.join(wraped_lines)
 
-
-    def set_out_labels(axs, x: str | list = None, y: str | list = None):
-        if axs.ndim == 1:
-            axs = axs.reshape(1, -1)
-        for ax in axs:
-            ax.set_xlabel(None)
-            ax.set_ylabel(None)
-
-        def _set_labels(xory: str, axs_, labels_):
-            assert xory in ('x', 'y')
-            if labels_ is None:
-                return
-            if isinstance(labels_, str):
-                labels_ = [labels_] * len(axs_)
-            assert len(axs_) == len(labels_)
-            for ax_, label_ in zip(axs_, labels_):
-                if xory == 'x':
-                    ax_.set_xlabel(label_)
-                else:
-                    ax_.set_ylabel(label_)
-
-        _set_labels('x', axs[-1, :], x)
-        _set_labels('y', axs[:, 0], y)
-
     reader = tbparse.SummaryReader(str(tbdir), extra_columns={'dir_name'})
     df = reader.scalars
     df['split'] = [dn.split('_')[-1] for dn in df['dir_name']]
@@ -126,7 +98,7 @@ def plot_tensorboard(tbdir: PathLike, stat_win_size: int = 10, title_suffix: str
         g.set(title=title_txt)
         g.get_legend().set_title(None)
 
-    remove_inner_labels(axs)
+    plotting.remove_inner_labels(axs)
     if txt:
         txt = _text_wrap(txt, 100)
         axs[0].text(0.01, -.1, txt, transform=axs[0].transAxes, fontsize=10,
@@ -142,9 +114,9 @@ if __name__ == "__main__":
     from common.utils import ostools
     from common.utils.dlutils import checkpoint
     from paths import MODELS_DIR
-    tbdirs = ostools.ls("/Users/davidu/tensorboard/geometric-neurons/TP_RS*", created_days_ago=1)
-    for tbdir in tbdirs:
+    tbdirs = ostools.ls("/Users/davidu/tensorboard/geometric-neurons/TP_RS*")
+    for tbdir in tbdirs[::-1]:
         plot_tensorboard(tbdir)
         #model_file = MODELS_DIR / (Path(tbdir).name + ".pth.checkpt")
         #meta = checkpoint.get_meta(model_file)
-    plt.show()
+        plt.show()

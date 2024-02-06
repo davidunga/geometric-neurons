@@ -94,8 +94,28 @@ def _pad_to_homogeneous(X):
         ValueError()
 
 
+def foo(li):
+
+    from time import sleep
+    if li[0] == 3:
+        sleep(8)
+    else:
+        sleep(6)
+    print(li)
+    return [x * 2 for x in li]
+
+def partest():
+    from multiprocessing import Pool
+
+    L1 = [1, 2, 3]
+    L2 = [3, 4, 5]
+    L3 = [5, 6, 7]
+
+    with Pool(4) as pool:
+        pool.map(foo, [L1, L2, L3])
+        print("done")
 
 if __name__ == "__main__":
-    A = planar.build(b=2, ang=0, t=0, reflect='none')
-    print(A)
-    print(planar.apply(A, np.array([1, 1]).reshape(1,-1)))
+    partest()
+    #run__make_and_save()
+    pass

@@ -1,6 +1,7 @@
 from numpy.typing import NDArray, ArrayLike
-from typing import Any, Sequence, Generator, Iterator, Optional, Container, Iterable, Collection, Sized, Callable, Literal
 from pathlib import Path
+from typing import (Any, Sequence, Generator, Iterator, Optional, Container,
+                    Iterable, Collection, Sized, Callable, Literal, Hashable)
 
 NpVec = NDArray
 NpMatrix = NDArray

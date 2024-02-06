@@ -1,6 +1,7 @@
 """
 Manage triplet data & loss
 """
+import pandas as pd
 import torch
 import numpy as np
 from collections import Counter
@@ -11,6 +12,7 @@ from scipy import stats
 from copy import deepcopy
 from common.utils.devtools import verbolize
 from common.utils import strtools
+from common.pairwise.embedding_eval import EmbeddingEvaluator, make_triplet_pairs
 
 
 class SamenessData(symmetric_pairs.SymmetricPairsData):
@@ -32,6 +34,7 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         self._notSame_counts = notSame_counts
         self._triplet_sampling_rate = None
         self._triplet_anchors = None
+        self.triplet_sampled_counts = None
 
     def modcopy(self, include_items: Container[int] = None, index_mask: Sequence[bool] = None):
         """ make modified copy """
@@ -57,10 +60,9 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
                             same_counts=same_counts,
                             notSame_counts=notSame_counts)
 
-    def init_triplet_sampling(self, anchors: Sequence[int] = None, lazy: bool = False):
+    def init_triplet_sampling(self, anchors: Sequence[int] = None):
 
-        if lazy and self._triplet_sampling_is_initialized:
-            return
+        self.reset_triplet_sampled_counts()
 
         min_counts = np.zeros(self.n, int)
         max_counts = np.zeros(self.n, int)
@@ -90,6 +92,7 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         self._triplet_sampling_rate /= self._triplet_sampling_rate.sum()
 
         self._triplet_anchors = anchors
+
         assert np.all(self._triplet_sampling_rate[self._triplet_anchors] > 0)
         assert len(min_counts) == len(self._triplet_sampling_rate) == self.n
 
@@ -161,7 +164,23 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
             positives.append(_sample(partners_of_anchor[SamenessData._SAME]))
             negatives.append(_sample(partners_of_anchor[SamenessData._NOTSAME]))
 
+            # done here (and not out size of the loop) because each item can be sampled multiple times
+            self.triplet_sampled_counts.loc[anchor, 'anchor'] += 1
+            self.triplet_sampled_counts.loc[positives[-1], 'positive'] += 1
+            self.triplet_sampled_counts.loc[negatives[-1], 'negative'] += 1
+
+        self.triplet_sampled_counts['total'] = self.triplet_sampled_counts[['anchor', 'positive', 'negative']].sum(axis=1)
+
+        # validate that we're only sampling samplable items..
+        is_non_samplable = np.ones(self.n, bool)
+        is_non_samplable[self.triplet_samplable_items] = False
+        assert not self.triplet_sampled_counts.loc[is_non_samplable, :].any().any()
+
         return anchors, positives, negatives
+
+    def reset_triplet_sampled_counts(self):
+        self.triplet_sampled_counts = pd.DataFrame(data=np.zeros((self.n, 4), int),
+                                                   columns=['anchor', 'positive', 'negative', 'total'])
 
     def sample_triplets(self, anchors: int | Sequence[int], rand_seed: int = None):
         anchors, positives, negatives = self.sample_triplet_items(anchors=anchors, rand_seed=rand_seed)
@@ -170,81 +189,14 @@ class SamenessData(symmetric_pairs.SymmetricPairsData):
         N = self.X[negatives]
         return A, P, N
 
-    def triplet_summary(self):
-        print("Samplable items:", strtools.part(len(self.triplet_samplable_items), self.n))
+    def triplet_summary_string(self) -> str:
+        s = "Samplable items: " + strtools.part(len(self.triplet_samplable_items), self.n)
         groups = self.pairs.loc[self.triplet_samplable_indexes_mask, 'group']
-        print("Participating pairs:", strtools.parts(Same=np.sum(groups == SamenessData._SAME),
-                                                     notSame=np.sum(groups == SamenessData._NOTSAME)))
-
-
-def calc_triplet_loss(p_dists: NDArray, n_dists: NDArray, margin: float = 1.) -> float:
-    d = p_dists - n_dists + margin
-    d[d < 0] = 0
-    return float(np.mean(d))
-
-
-class SamenessEval:
-
-    fpr: NpVec[float]
-    tpr: NpVec[float]
-    ths: NpVec[float]
-    auc: float
-    loss: float | None
-
-    @property
-    def tscore(self):
-        # returns the t-test statistic if it's statistically significant, else 0
-        return 0 if self.ttest.pvalue > .05 else self.ttest.statistic
-
-    def __init__(self,
-                 sameness: SamenessData,
-                 n_samples: int = 1000,
-                 kind: str = "triplet",
-                 triplet_margin: float = 1.,
-                 rand_seed: int = 0):
-
-        self.sameness = sameness
-        self.triplet_margin = triplet_margin
-        self.kind = kind
-        self.ttest = None
-        self.items: Sequence[tuple[int, int]]
-        self.is_same: NpVec[bool]
-
-        if self.kind == "pair":
-            self.items, self.is_same = zip(*sameness.labeled_pairs())
-        elif self.kind == "triplet":
-            assert n_samples % 2 == 0
-            a, p, n = sameness.sample_triplet_items(anchors=n_samples // 2, rand_seed=rand_seed)
-            self.items = [(aa, pp) for aa, pp in zip(a, p)] + [(aa, nn) for aa, nn in zip(a, n)]
-            self.is_same = np.arange(len(self.items)) < len(p)
-
-        assert len(self.items) == len(self.is_same) == n_samples
-
-    def evaluate(self, embedder: torch.nn.Module):
-
-        is_training = embedder.training
-        embedder.train(False)
-        eX = embedder(self.sameness.X).detach().numpy()
-        embedder.train(is_training)
-
-        dists = np.linalg.norm([eX[i] - eX[j] for (i, j) in self.items], axis=1)
-        self.fpr, self.tpr, self.ths = metrics.roc_curve(y_true=~self.is_same, y_score=dists)
-        self.auc = metrics.auc(self.fpr, self.tpr)
-        self.ttest = stats.ttest_ind(dists[self.is_same], dists[~self.is_same], alternative='less')
-        self.loss = None
-        if self.kind == "triplet":
-            self.loss = calc_triplet_loss(dists[self.is_same], dists[~self.is_same], margin=self.triplet_margin)
-
-    def __str__(self):
-        s = f"auc={self.auc * 100:2.2f}, tscore={self.tscore:2.1f}"
-        if self.loss is not None:
-            s += f" loss={self.loss:2.4f}"
+        s += "Participating pairs: " + strtools.parts(Same=np.sum(groups == SamenessData._SAME),
+                                                      notSame=np.sum(groups == SamenessData._NOTSAME))
         return s
 
-    def results_dict(self):
-        return {"auc": self.auc,
-                "tscore": self.tscore,
-                "loss": self.loss,
-                "ttest-t": self.ttest.statistic,
-                "ttest-p": self.ttest.pvalue,
-                "ttest-ci": self.ttest.confidence_interval()}
+    def make_evaluator(self, n_samples: int = 1000, rand_seed: int = 1, **kwargs) -> EmbeddingEvaluator:
+        assert n_samples % 2 == 0
+        a, p, n = self.sample_triplet_items(anchors=n_samples // 2, rand_seed=rand_seed)
+        return EmbeddingEvaluator.from_triplets(self.X, a, p, n, **kwargs)

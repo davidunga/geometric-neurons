@@ -5,26 +5,25 @@ data:
       lag: .1
     segments:
       dur: .2
-      radcurv_bounds: [.2, 5]
+      radcurv_bounds: [[.2, 5]]
     pairing:
-      variable: kin.X
-      metric__grid: [affine, ortho]
+      variable: kin.EuSpd
+      metric: [rigid]
       same_pctl: .05
       notSame_pctl: .2
       exclude_pctl: .8
       max_pairs: 100000
-      balance: True
+      balance: [True]
     predictor:
       variable: neural
-      bin_sz: .05
+      bin_sz: [.05]
       normalize: True
       triplet_min_prevalence: 5
       shuffle: False
 
-
 model:
-  dim__grid: [7, 3]
-  dropout__grid: [0.75]
+  dim: [3, 7]
+  dropout: [0.5]
 
 training:
   cv:
@@ -34,10 +33,10 @@ training:
     patience: null
     overfit: 100
     converge: 1.e-4
-  epochs: 50
-  batch_size: 32
-  epoch_size_factor: .2
-  loss_margin: 1.0
+  epochs: 100
+  batch_size: [32]
+  batches_in_epoch: 2000
+  loss_margin: [1.0]
   optim_params:
-    kind: Adam
-    lr__grid: [5.e-04, 5.e-05]
+    kind: [SGD]
+    lr: [5.e-03, 1.e-03, 1.e-04]

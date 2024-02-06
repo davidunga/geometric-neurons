@@ -1,14 +1,143 @@
 """ Deep-learning utilities """
+import os
+import json
 import pandas as pd
 import torch
+from copy import deepcopy
 from common.utils.typings import *
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from common.utils import ostools
 import numpy as np
 
 
 def get_optimizer(model_params, kind: str = 'Adam', **optim_kws):
     return getattr(torch.optim, kind)(model_params, **optim_kws)
+
+
+def get_torch_device(device: str = 'auto') -> str:
+    """
+    Get the PyTorch device.
+    Args:
+        device: 'cpu' / 'gpu' / 'auto'
+            'gpu' = 'cuda' or 'mps'. raises error if no gpu is available.
+            'auto' = 'cuda' or 'mps' or 'cpu', in that order.
+    Returns:
+        str: The string identifier of the device: ('cuda', 'mps', or 'cpu')
+    Raises:
+        RuntimeError: If 'gpu' is requested but neither CUDA nor MPS is available.
+    """
+
+    assert device in ('cpu', 'gpu', 'auto')
+    if device == 'cpu':
+        return 'cpu'
+    if torch.cuda.is_available():
+        return 'cuda'
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return 'mps'
+    if device == 'gpu':
+        raise RuntimeError("No GPU support (CUDA or MPS) available.")
+    return 'cpu'
+
+
+class SnapshotMgr:
+
+    """
+    dump & load tagged snapshots of (model, optimizer, meta)
+    """
+
+    def __init__(self, file: PathLike, base_meta: dict = None):
+        self.file = Path(file)
+        self.base_meta = base_meta if base_meta else {}
+
+    def load(self, tag: str) -> tuple[torch.nn.Module, torch.optim.Optimizer, dict]:
+        return self.multi_load(tags=[tag])[tag]
+
+    def multi_load(self, tags: list[str] = None) -> dict[str, tuple[torch.nn.Module, torch.optim.Optimizer, dict]]:
+        snapshots = self._fetch_all_snapshots()
+        tags = tags if tags else snapshots.keys()
+        result = {}
+        for tag in tags:
+            items = snapshots[tag]
+            model = items['model']
+            model.load_state_dict(items['state_dict'])
+            optimizer = items['optimizer']
+            if optimizer:
+                optimizer.load_state_dict(items['optimizer_state'])
+            meta = items['meta']
+            result[tag] = (model, optimizer, meta)
+        return result
+
+    def get_metas(self) -> dict:
+        snapshots = self._fetch_all_snapshots()
+        return {tag: snapshots[tag]['meta'] for tag, items in snapshots.items()}
+
+    def set_metas(self, metas: dict):
+        snapshots = self._fetch_all_snapshots()
+        for tag, meta in metas.items():
+            snapshots[tag]['meta'] = meta
+        self._safe_dump_snapshots(snapshots, allow_new_tag=False)
+
+    def dump(self,
+             tag: str,
+             model: torch.nn.Module,
+             optimizer: torch.optim.Optimizer = None,
+             meta: dict = None,
+             allow_new_tag: bool = True):
+
+        items = {
+            'model': model,
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer,
+            'optimizer_state': optimizer.state_dict() if optimizer else None,
+            'meta': deepcopy(self.base_meta)
+        }
+
+        if meta:
+            items['meta'].update(meta)
+
+        self._safe_dump_snapshots({tag: items}, allow_new_tag)
+
+    def _fetch_all_snapshots(self) -> dict:
+        if self.file.is_file() and self.file.stat().st_size:
+            return torch.load(str(self.file))
+        else:
+            return {}
+
+    def wipe(self, tags: list[str] = None):
+        snapshots = self._fetch_all_snapshots()
+        tags = tags if tags else snapshots.keys()
+        for tag in tags:
+            del snapshots[tag]
+        if not snapshots:
+            # if no snapshots, clear file completely
+            os.remove(str(self.file))
+            self.file.touch()
+        else:
+            torch.save(snapshots, str(self.file))
+
+    def _safe_dump_snapshots(self, snapshots: dict, allow_new_tag: bool):
+        base_snapshots = self._fetch_all_snapshots()
+        for tag, items in snapshots.items():
+            assert allow_new_tag or (tag in base_snapshots)
+            SnapshotMgr.validate_snapshot_tag_and_items(tag=tag, items=items)
+        base_snapshots.update(snapshots)
+        torch.save(base_snapshots, str(self.file))
+
+    @staticmethod
+    def validate_snapshot_tag_and_items(tag: str, items: dict):
+
+        # validate tag:
+        assert isinstance(tag, str)
+        assert "*" not in tag
+
+        # validate items
+        assert set(items.keys()) == {'model', 'state_dict', 'optimizer', 'optimizer_state', 'meta'}
+        assert isinstance(items['model'], torch.nn.Module)
+        assert isinstance(items['state_dict'], dict)
+        assert (items['optimizer'] is None) == (items['optimizer_state'] is None)
+        assert items['optimizer'] is None or isinstance(items['optimizer'], torch.optim.Optimizer)
+        assert items['optimizer_state'] is None or isinstance(items['optimizer_state'], dict)
+        assert items['meta'] is None or isinstance(items['meta'], dict)
 
 
 class checkpoint:
@@ -178,7 +307,9 @@ class ProgressManager:
 
     @property
     def status_dict(self) -> dict:
-        return {'done': self.should_stop, 'stop_reason': self.stop_reason, 'stop_epoch': self.stop_epoch}
+        return {'stopped': self.should_stop,
+                'state': 'ongoing' if not self.should_stop else f'stopped:{self.stop_reason}',
+                'epoch': self._epoch}
 
     def process(self, val_loss: float, train_loss: float, val_score: float, epoch: int = None) -> None:
 
@@ -422,10 +553,3 @@ def plot_tensorboard(tbdir: PathLike, stat_win_size: int = 10, title_suffix: str
 
     name = '/'.join(Path(reader.log_path).parts[-2:]) + ' ' + title_suffix
     fig.canvas.manager.set_window_title(name)
-
-
-
-
-if __name__ == "__main__":
-    plot_tensorboard("/Users/davidu/tensorboard/geometric-neurons/TP_RS bin10 lag100 dur200 pairKinxOrtho 7c9931.Fold0")
-    plt.show()

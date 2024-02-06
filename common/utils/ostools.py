@@ -1,57 +1,65 @@
 from pathlib import Path
 from typing import Literal
 from glob import glob
-import os
 from datetime import datetime
-from datetime import timedelta
+from dataclasses import dataclass
+from common.utils.timetools import timediff
+from common.utils import strtools
 
 
 def ls(arg: str | Path,
-       sortby: Literal['name', 'path', 'create', 'modify', 'access', 'size'] = 'path',
+       sortby: Literal['path', 'name', 'created', 'modified', 'accessed', 'size'] = 'path',
        kind: Literal['file', 'dir', 'both'] = 'both',
-       created_days_ago: float = None,
-       modified_days_ago: float = None,
-       aspath: bool = False):
+       allow_zero_size: bool = True
+       ) -> list[Path]:
 
-    paths_list = glob(str(arg))
+    file_infos = [FileInfo(pth) for pth in glob(str(arg))]
 
     if kind != 'both':
-        paths_list = [pth for pth in paths_list if os.path.isfile(pth) == (kind == 'file')]
+        file_infos = [file_info for file_info in file_infos if file_info.path.is_file() == (kind == 'file')]
 
-    if sortby == 'path':
-        paths_list.sort()
-    elif sortby == 'name':
-        paths_list.sort(key=os.path.basename)
-    else:
-        paths_list.sort(key=lambda x: stats(x)[sortby])
+    if not allow_zero_size:
+        file_infos = [file_info for file_info in file_infos if file_info.size > 0]
 
-    created_dt = timedelta(days=created_days_ago) if created_days_ago is not None else None
-    modified_dt = timedelta(days=modified_days_ago) if modified_days_ago is not None else None
-    if created_dt is not None or modified_dt is not None:
-        now_t = datetime.now()
-        paths_list_ = []
-        for pth in paths_list:
-            pth_stats = stats(pth)
-            if created_dt is not None and (now_t - pth_stats['create']) > created_dt:
-                continue
-            if modified_dt is not None and (now_t - pth_stats['modify']) > modified_dt:
-                continue
-            paths_list_.append(pth)
-        paths_list = paths_list_
+    file_infos.sort(key=lambda x: x[sortby])
 
-    if aspath:
-        paths_list = [Path(pth) for pth in paths_list]
-
-    return paths_list
+    return [file_info.path for file_info in file_infos]
 
 
-def stats(pth: str | Path | list):
-    if isinstance(pth, list):
-        return [stats(p) for p in pth]
-    s = os.stat(pth)
-    ret = {'create': datetime.fromtimestamp(s.st_birthtime),
-           'modify': datetime.fromtimestamp(s.st_mtime),
-           'inode_change': datetime.fromtimestamp(s.st_ctime),
-           'access': datetime.fromtimestamp(s.st_atime),
-           'size': s.st_size}
-    return ret
+@dataclass
+class FileInfo:
+
+    path: Path | str
+    size: int = None
+    created: datetime = None
+    modified: datetime = None
+    inode_change: datetime = None
+    accessed: datetime = None
+
+    def __post_init__(self):
+        self.path = Path(self.path)
+        stat = self.path.stat()
+        self.size = stat.st_size
+        self.created = datetime.fromtimestamp(stat.st_birthtime)
+        self.modified = datetime.fromtimestamp(stat.st_mtime)
+        self.inode_change = datetime.fromtimestamp(stat.st_ctime)
+        self.accessed = datetime.fromtimestamp(stat.st_atime)
+
+    def time_ago(self, attrib, unit: str = 's') -> float:
+        return timediff.convert(datetime.now() - getattr(self, attrib), unit)
+
+    def days_ago_created(self) -> float:
+        return self.time_ago('created', unit='d')
+
+    def days_ago_modified(self) -> float:
+        return self.time_ago('modified', unit='d')
+
+    @property
+    def name(self) -> str:
+        return self.path.name
+
+    def __getitem__(self, item):
+        return getattr(self, item)
+
+    def display(self):
+        print(strtools.attribs_string(self))

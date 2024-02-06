@@ -9,8 +9,13 @@ import paths
 import pickle
 from common.utils.typings import *
 from common.symmetric_pairs import SymmetricPairsData
+from common import symmetric_pairs
 from analysis.config import DataConfig, Config
 from analysis.data_manager import DataMgr
+from multiprocessing import Pool
+from datetime import datetime
+from glob import glob
+import os
 
 
 def make_and_save(cfg: DataConfig, force: bool = False) -> None:
@@ -19,14 +24,13 @@ def make_and_save(cfg: DataConfig, force: bool = False) -> None:
 
     def _calc_level(level: DataConfig.Level):
         if level == DataConfig.BASE:
-            return make_base_data(dataset=cfg.base.name, lag=cfg.base.lag, bin_sz=cfg.base.bin_sz,
-                                  kin_as_neural=cfg.base.kin_as_neural)
+            return make_base_data(dataset=cfg.base.name, lag=cfg.base.lag, bin_sz=cfg.base.bin_sz)
         elif level == DataConfig.SEGMENTS:
             return extract_segments(data=loaded[DataConfig.BASE], dur=cfg.segments.dur,
                                     radcurv_bounds=cfg.segments.radcurv_bounds)
         elif level == DataConfig.PAIRING:
             return calc_pairing(segments=loaded[DataConfig.SEGMENTS], pairing_variable=cfg.pairing.variable,
-                                pairing_metric=cfg.pairing.metric)
+                                pairing_metric=cfg.pairing.metric, n_workers=8)
         else:
             raise ValueError("Unknown level")
 
@@ -43,16 +47,13 @@ def make_and_save(cfg: DataConfig, force: bool = False) -> None:
 # ====================================================================================
 
 
-def make_base_data(dataset: str, lag: float, bin_sz: float, kin_as_neural: bool) -> Data:
+def make_base_data(dataset: str, lag: float, bin_sz: float) -> Data:
     assert abs(lag) <= 1, "Lag should be in seconds"
     assert .001 < bin_sz <= 1, "Bin size should be in seconds"
     if dataset in HATSO_DATASET_SPECS:
         data = make_hatso_data(paths.GLOBAL_DATA_DIR / "hatsopoulos", dataset, lag=lag, bin_sz=bin_sz)
     else:
         raise ValueError("Cannot determine data source")
-    if kin_as_neural:
-        for trial in data:
-            trial.neural = NeuralData(df=trial.kin._df, t=trial.kin.t)
     return data
 
 
@@ -127,55 +128,162 @@ def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]
     return segments
 
 
-def calc_pairing(segments: list[Segment],
-                 pairing_variable: str,
-                 pairing_metric: str) -> SymmetricPairsData:
+class PairingCalcWorker:
 
-    X = [s[pairing_variable][:, :2] for s in segments]
-    procrustes = Procrustes(kind=pairing_metric)
+    def __init__(self, X: NpPoints, uids: list[str], procrustes: Procrustes, dump_root: Path | str,
+                 name: str = "", report_every: int | float = .05, dump_every: int | float = .05):
 
-    print(f"Computing segments pairing {pairing_variable} {pairing_metric} ...")
-    num_pairs = len(segments) * (len(segments) - 1) // 2
-    dists = [{} for _ in range(num_pairs)]
-    count = -1
+        self.X = X
+        self.uids = uids
+        self.procrustes = procrustes
+        self.dump_root = Path(dump_root)
+        self.name = name
+        self.report_every = report_every
+        self.dump_every = dump_every
 
-    for i in range(len(segments) - 1):
-        for j in range(i + 1, len(segments)):
-            count += 1
-            if count % 50_000 == 0:
-                print(f'{count}/{num_pairs} ({count/num_pairs:3.2%})')
-            proc_dist, A, _ = procrustes(X[i], X[j])
+    @classmethod
+    def from_segments(cls, segments: list[Segment], pairing_variable: str, **kwargs):
+        X = DataMgr.make_pairing_X(pairing_variable, segments)
+        return cls(X=X, uids=[s.uid for s in segments], **kwargs)
+
+    def __call__(self, start_ix: int = 0, stop_ix: int = None):
+
+        n_pairs_tot = symmetric_pairs.num_pairs(len(self.X))
+        stop_ix = n_pairs_tot if stop_ix is None else stop_ix
+        n_pairs = stop_ix - start_ix
+
+        def _dump(items_):
+            n_digits = str(len(str(n_pairs_tot)) + 1)
+            fmt = "{:0" + n_digits + "d} - {:0" + n_digits + "d}.pkl"
+            pkl_file = self.dump_root / fmt.format(items_[0]['pair_index'], items_[-1]['pair_index'])
+            pickle.dump(items_, open(pkl_file, 'wb'))
+
+        report_every = int(self.report_every * n_pairs) if self.report_every < 1 else self.report_every
+        dump_every = int(self.dump_every * n_pairs) if self.dump_every < 1 else self.dump_every
+
+        items = []
+        pair_ix = -1
+        for i, j in symmetric_pairs.iter_pairs(len(self.X)):
+
+            pair_ix += 1
+            if pair_ix < start_ix:
+                continue
+            if pair_ix == stop_ix:
+                break
+
+            k = pair_ix - start_ix
+            if k % report_every == 0:
+                name_str = "" if not self.name else (self.name + ": ")
+                print(f'  {name_str}{k}/{n_pairs} ({k/n_pairs:3.2%})')
+
+            proc_dist, A, _ = self.procrustes(self.X[i], self.X[j])
             b, ang, t, is_reflected, ortho_score = linalg.planar.decompose(A)
             scale = b if b > 1 else 1 / b
             loc = float(np.linalg.norm(t))
-            pair_item = {'seg1': segments[i].uid,
-                         'seg2': segments[j].uid,
-                         'scale': scale,
-                         'ang': ang,
-                         'loc': loc,
-                         'proc_dist': proc_dist,
-                         'uniform_scale_score': ortho_score,
-                         'reflected': is_reflected}
-            dists[count] = pair_item
+
+            items.append({
+                'pair_index': pair_ix,
+                'seg1': self.uids[i],
+                'seg2': self.uids[j],
+                'scale': scale,
+                'ang': ang,
+                'loc': loc,
+                'proc_dist': proc_dist,
+                'uniform_scale_score': ortho_score,
+                'reflected': is_reflected
+            })
+
+            if pair_ix > 0 and pair_ix % dump_every == 0:
+                _dump(items)
+                items = []
+
+        if items:
+            _dump(items)
+
+        return True
+
+
+def run_pairing_calc_worker(worker: PairingCalcWorker, start_ix: int, stop_ix: int):
+    return worker(start_ix, stop_ix)
+
+
+def calc_pairing(segments: list[Segment],
+                 pairing_variable: str,
+                 pairing_metric: str,
+                 n_workers: int = 8) -> SymmetricPairsData:
+
+    print(f"Calculating pairing over {len(segments)} segments")
+    print("Pairing metric=", pairing_metric)
+    print("Pairing variable=", pairing_variable)
+
+    pairs = list(symmetric_pairs.iter_pairs(len(segments)))
+
+    print("Num pairs=", len(pairs))
+    print(f"Preparing {n_workers} workers")
+
+    split_ixs = np.round(np.linspace(0, len(pairs), n_workers + 1)).astype(int)
+    X = DataMgr.make_pairing_X(pairing_variable, segments)
+
+    time_str = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dump_root = paths.DATA_DIR / "tmp" / f"{pairing_variable}-{pairing_metric}-{len(pairs)}-{time_str}".replace('.', '')
+    dump_root.mkdir(exist_ok=False, parents=True)
+    print("Dumping to:", str(dump_root))
+
+    args = []
+    for worker_ix in range(n_workers):
+        start_ix = split_ixs[worker_ix]
+        stop_ix = split_ixs[worker_ix + 1]
+        worker = PairingCalcWorker(X=X.copy(),
+                                   uids=[s.uid for s in segments],
+                                   procrustes=Procrustes(kind=pairing_metric),
+                                   name=f"Worker{worker_ix}",
+                                   dump_root=dump_root)
+        args.append((worker, start_ix, stop_ix))
+
+    print(f"Dispatching workers")
+
+    assert len(args) == n_workers
+    if n_workers == 1:
+        run_pairing_calc_worker(*args[0])
+    else:
+        with Pool(n_workers) as pool:
+            pool.starmap(run_pairing_calc_worker, args)
+
+    print("Workers are done. Temp files are under:", str(dump_root))
+    print("Constructing dataframe")
+
+    pkls = glob(str(dump_root / "*.pkl"))
+    dists = []
+    for pkl in pkls:
+        worker_dists = pickle.load(open(pkl, 'rb'))
+        dists += worker_dists
+
+    dists = pd.DataFrame.from_records(dists)
+    dists.sort_values(by='pair_index', inplace=True, ignore_index=True)
+    assert all(dists.index == dists['pair_index'])
+    dists = dists.drop('pair_index', axis=1)
+    assert dists["seg1"].tolist() == [segments[i].uid for i, _ in pairs]
+    assert dists["seg2"].tolist() == [segments[i].uid for _, i in pairs]
+    seg_pairs = SymmetricPairsData(data=dists, n=len(segments))
+
+    for pkl in pkls:
+        os.remove(pkl)
 
     print("Done.")
-    dists = pd.DataFrame.from_records(dists)
-    seg_pairs = SymmetricPairsData(data=dists, n=len(segments))
+
     return seg_pairs
 
 
 def run__make_and_save():
-    force = True
-    for pairing_variable in ['neuralPc']:
-        for pairing_metric in ['ortho', 'affine']:
-            for bin_sz in [.01, .02]:
-                for dataset in ['TP_RJ', 'TP_RS']:
-                    data_cfg = Config.from_default().data
-                    data_cfg.base.name = dataset
-                    data_cfg.base.bin_sz = bin_sz
-                    data_cfg.pairing.metric = pairing_metric
-                    data_cfg.pairing.variable = pairing_variable
-                    make_and_save(data_cfg, force=force)
+    force = False
+    for pairing_metric in ['rigid']:
+        for bin_sz in [.01]:
+            for dataset in ['TP_RS']:
+                data_cfg = Config.from_default().data
+                data_cfg.base.name = dataset
+                data_cfg.base.bin_sz = bin_sz
+                data_cfg.pairing.metric = pairing_metric
+                make_and_save(data_cfg, force=force)
 
 
 if __name__ == "__main__":

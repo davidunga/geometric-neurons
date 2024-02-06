@@ -1,10 +1,12 @@
 import numpy as np
-
+import pandas as pd
+from common.utils import polytools
 from analysis.config import Config
 from geometric_encoding.embedding import LinearEmbedder
 from analysis.data_manager import DataMgr
 from common.pairwise.triplet_train import triplet_train
 from common.pairwise.sameness import SamenessData
+from common.pairwise import embedding_eval
 from motorneural.data import Segment
 from common.utils.procrustes import Procrustes
 from common.utils import linalg
@@ -58,16 +60,127 @@ def draw_segment_in_trial(data, segment: Segment, trial_style='y.-', segment_sty
     plt.plot(segment.kin.X[:, 0], segment.kin.X[:, 1], segment_style)
 
 
-def show_triplets(cfg: Config = None):
-    pairing_metrics = ('affine', 'ortho', 'offset')
+def show_extreme_proc_segment_pairs(cfg: Config = None):
+    """
+    For each procrustes kind, show segment pairs of minimal & maximal distance (from random subsample of data)
+    """
+
+    n_anchors = 500
+    seed = 1
 
     if not cfg:
         cfg = Config.from_default()
 
-    data = DataMgr(cfg.data).load_base_data()
     sameness, pairs, segments = DataMgr(cfg.data).load_sameness()
+    sameness.init_triplet_sampling()
+    print(sameness.triplet_summary_string())
 
-    print("Showing triplets from", cfg.str())
+    anchors, positives, negatives = sameness.sample_triplet_items(n_anchors, rand_seed=seed)
+    pairs, _ = embedding_eval.make_triplet_pairs(anchors, positives, negatives)
+    kinX = [s.kin['X'] for s in segments]
+
+    for kind in Procrustes.KINDS:
+        procrustes = Procrustes(kind=kind)
+
+        dists = np.array([procrustes(kinX[i], kinX[j])[0] for (i, j) in pairs]).squeeze()
+
+        ixs = {
+            'max': np.argmax(dists),
+            'min': np.argmin(dists),
+        }
+
+        _, axs = plt.subplots(ncols=len(ixs))
+        for k, (name, ix) in enumerate(ixs.items()):
+            plt.sca(axs[k])
+            i, j = pairs[ix]
+            XXj = procrustes(kinX[i], kinX[j])[2]
+            plt.plot(*kinX[i].T, 'bo-', label=f"Seg {i}")
+            plt.plot(*XXj.T, 'ro-', label=f"Seg {j}")
+            plt.title(f"{name} {kind}")
+            plt.legend()
+
+    plt.show()
+
+
+def compare_rigid_to_speed_dist(cfg: Config = None):
+    """
+    Compare Rigid procrustes distance to speed distance (=difference of average speeds)
+    Meant for visually validating rigid procrustes and generally checking sanity,
+    as for similar shapes the rigid distance should correlate with speed distance
+    """
+
+    n_anchors = 500
+    seed = 1
+
+    if not cfg:
+        cfg = Config.from_default()
+
+    sameness, pairs, segments = DataMgr(cfg.data).load_sameness()
+    sameness.init_triplet_sampling()
+    print(sameness.triplet_summary_string())
+
+    anchors, positives, negatives = sameness.sample_triplet_items(n_anchors, rand_seed=seed)
+    pairs, is_same = embedding_eval.make_triplet_pairs(anchors, positives, negatives)
+
+    spd = np.array([s.kin['EuSpd'] for s in segments]).mean(axis=1, keepdims=True)
+    spd_dists = embedding_eval.pairs_dists(x=spd, pairs=pairs).squeeze()
+
+    rigid_procrustes = Procrustes(kind='offset')
+    X = DataMgr.make_pairing_X('kin.EuSpd', segments)
+    kinX = X # [s.kin['X'] for s in segments]
+    rigid_dists = np.array([rigid_procrustes(X[i], X[j])[0] for (i, j) in pairs]).squeeze()
+
+    normalized_rigid_dists = (rigid_dists - np.mean(rigid_dists)) / np.std(rigid_dists)
+    normalized_spd_dists = (spd_dists - np.mean(spd_dists)) / np.std(spd_dists)
+
+    ixs = {
+        'rigid>speed': np.argmax(normalized_rigid_dists - normalized_spd_dists),
+        'rigid<speed': np.argmin(normalized_rigid_dists - normalized_spd_dists),
+        'rigid=speed': np.argmin(np.abs(normalized_rigid_dists - normalized_spd_dists)),
+        'min rigid': np.argmin(normalized_rigid_dists)
+    }
+    colors = 'red', 'limeGreen', 'gold', 'black'
+
+    rigid_dists = normalized_rigid_dists
+    spd_dists = normalized_spd_dists
+
+    plt.figure()
+    plt.scatter(spd_dists, rigid_dists, alpha=.5)
+    for k, (name, ix) in enumerate(ixs.items()):
+        plt.plot(spd_dists[ix], rigid_dists[ix], '^', color=colors[k], label=name)
+    plt.legend()
+    plt.xlabel("Speed distances")
+    plt.ylabel("Rigid distances")
+
+    _, axs = plt.subplots(ncols=len(ixs))
+    for k, (name, ix) in enumerate(ixs.items()):
+        plt.sca(axs[k])
+        i, j = pairs[ix]
+        XXj = rigid_procrustes(kinX[i], kinX[j])[2]
+        plt.plot(*kinX[i].T, 'bo-', label=f"Seg {i} Arclen={polytools.total_arclen(kinX[i]):2.3f}")
+        plt.plot(*XXj.T, 'ro-', label=f"Seg {j} Arclen={polytools.total_arclen(kinX[j]):2.3f}")
+        plt.title(f"{name}\nSpeed Dist={spd_dists[ix]:2.3f}\nRigid Dist={rigid_dists[ix]:2.3f}")
+        plt.legend()
+
+    plt.show()
+
+
+def show_triplets(cfg: Config = None):
+
+    if not cfg:
+        cfg = Config.from_default()
+    cfg.data.pairing.metric = 'rigid'
+
+    data_mgr = DataMgr(cfg.data)
+    data = data_mgr.load_base_data()
+    sameness, pairs, segments = data_mgr.load_sameness()
+    sameness.init_triplet_sampling()
+    print(sameness.triplet_summary_string())
+
+    anchors, positives, negatives = sameness.sample_triplet_items(500, rand_seed=0)
+    pairs, is_same = embedding_eval.make_triplet_pairs(anchors, positives, negatives)
+
+    native_procrustes = Procrustes(kind=cfg.data.pairing.metric)
 
     def _draw_segments(aXX, pXX, nXX, labels=None):
         if not labels:
@@ -76,18 +189,56 @@ def show_triplets(cfg: Config = None):
         plt.plot(pXX[:, 0], pXX[:, 1], **STYLES['pos'], label=labels['p'])
         plt.plot(nXX[:, 0], nXX[:, 1], **STYLES['neg'], label=labels['n'])
 
-    dists = pairs['proc_dist']
+    spd = np.array([s.kin['EuSpd'] for s in segments]).mean(axis=1, keepdims=True)
+    spd_dists = embedding_eval.pairs_dists(x=spd, pairs=pairs)
 
-    sameness.init_triplet_sampling()
-    sameness.triplet_summay()
+    rigid_procrustes = Procrustes(kind='rigid')
+    kinX = [s.kin['X'] for s in segments]
+    rigid_dists = np.array([rigid_procrustes(kinX[i], kinX[j])[0] for (i, j) in pairs])
 
-    anchors = list(sameness.triplet_participating_items)[:500]
-    anchors, positives, negatives = sameness.sample_triplet_items(anchors, rand_seed=0)
+    plt.figure()
+    plt.plot(np.array(spd_dists).squeeze(), np.array(rigid_dists).squeeze(), '.')
+    plt.xlabel("Span")
+    plt.ylabel("Rigid")
+    plt.show()
 
-    pairing_Xs = DataMgr(cfg).get_pairing_X(segments)
+    # X = pairing_Xs[anchors]
+    # P = pairing_Xs[positives]
+    # N = pairing_Xs[negatives]
+    #
+    #
+    # p_dist, _, _ = procrustes(X, P)
+    # n_dist, _, _ = procrustes(X, N)
 
-    native_pairing_metric = cfg.data.pairing.metric
-    procrustes = Procrustes(kind=native_pairing_metric)
+
+
+    loss_func = embedding_eval.EmbeddingLoss(kind="triplet", margin=cfg.training.loss_margin)
+
+    print("kinSpd_avg:")
+    print(embedding_eval.evaluate_embedded_vecs(
+        embedded_vecs=kinSpd_avg, pairs=pairs, is_same=is_same, loss_func=loss_func))
+
+    print("kinX_span:")
+    print(embedding_eval.evaluate_embedded_vecs(
+        embedded_vecs=kinX_span, pairs=pairs, is_same=is_same, loss_func=loss_func))
+
+    sameness_eval_result = sameness.make_evaluator(loss_margin=cfg.training.loss_margin).evaluate()
+    print(native_pairing_metric, ":")
+    print(sameness_eval_result)
+
+    #speed_df = pd.DataFrame({'dists': dists, 'is_same': is_same})
+
+    plt.figure()
+    plt.plot(np.array(kinX_span).squeeze(), np.array(kinSpd_avg).squeeze(), '.')
+    plt.xlabel("Span")
+    plt.ylabel("Speed")
+    plt.show()
+
+
+
+    pairing_metrics = ['ortho', 'rigid', 'offset']
+    if native_pairing_metric == 'affine':
+        pairing_metrics[0] = 'affine'
 
     axs = None
     axs2 = None
@@ -333,4 +484,6 @@ def _pca_sandbox():
 #show_neural_by_kins(kin_names=['EuSpdAng','EuAccAng', 'EuSpd'], nbins=12)
 #show_kin_sorted_trials()
 #check_sampling_times()
-show_triplets()
+#show_triplets()
+#show_extreme_proc_segment_pairs()
+compare_rigid_to_speed_dist()

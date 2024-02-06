@@ -43,14 +43,6 @@ class DataMgr:
         pairs = pickle.load(self.pkl_path(DataConfig.PAIRING).open('rb'))
         verbolize.close()
 
-        seg_ids = list(set(pairs['seg1']).union(pairs['seg2']))
-        n_vals = int(.1 * len(seg_ids))
-        val_segs = np.random.default_rng(0).permutation(seg_ids)[:n_vals]
-        val_counts = pairs[['seg1', 'seg2']].isin(val_segs).sum(axis=1)
-
-        val_pairs = val_counts == 2
-        train_pairs = val_counts == 0
-
         if 'proc_dist_rank' not in pairs.data:
             pairs.data['proc_dist_rank'] = pairs.data['proc_dist'].argsort().argsort()
             pickle.dump(pairs, self.pkl_path(DataConfig.PAIRING).open('wb'))
@@ -60,30 +52,22 @@ class DataMgr:
         notSame_rank = int(self.cfg.pairing.notSame_pctl * len(ranks))
         exclude_rank = int(self.cfg.pairing.exclude_pctl * len(ranks))
 
-        # same/notSame ranks based on percentile thresholds
-        n_same = same_rank
-        n_notSame = exclude_rank - notSame_rank
-        n_tot = n_same + n_notSame
+        if self.cfg.pairing.balance:
 
-        # current and target same/notSame ratio
-        p_same = n_same / n_tot
-        p_notSame = 1 - p_same
-        target_p_same = .5 if self.cfg.pairing.balance else p_same
-        target_p_notSame = 1.0 - target_p_same
+            # from ranks to counts
+            n_same = same_rank
+            n_notSame = exclude_rank - notSame_rank
 
-        # calc scale factor to bring target ratios to target counts
-        max_scale = min(p_same / target_p_same, p_notSame / target_p_notSame)
-        max_n_tot = min(self.cfg.pairing.max_pairs, n_tot) if self.cfg.pairing.max_pairs else n_tot
-        scale = min(max_scale, max_n_tot / n_tot)
+            # counts after balance
+            n_same = n_notSame = min(n_same, n_notSame)
 
-        target_n_same = int(scale * target_p_same * n_tot)
-        target_n_notSame = int(scale * target_p_notSame * n_tot)
+            # from balanced counts back to ranks
+            same_rank = n_same
+            notSame_rank = exclude_rank - n_notSame
 
-        target_same_rank = target_n_same
-        target_notSame_rank = exclude_rank - target_n_notSame
+        sameness = (ranks < same_rank).astype(int)
+        sameness[(ranks < exclude_rank) & (ranks >= notSame_rank)] = -1
 
-        sameness = (ranks < target_same_rank).astype(int)
-        sameness[(ranks < exclude_rank) & (ranks >= target_notSame_rank)] = -1
         pairs.data['sameness'] = sameness
 
         return pairs
@@ -140,6 +124,9 @@ class DataMgr:
 
         return sameness_data, pairs, segments
 
+    def get_pairing_X(self, segments: list[Segment]):
+        return self.make_pairing_X(self.cfg.pairing.variable, segments)
+
     @staticmethod
     def assert_pairs_and_segments_compatibility(pairs: SymmetricPairsData, segments: list[Segment]):
         """ check that pairs are based on segments, including their ordering """
@@ -148,8 +135,11 @@ class DataMgr:
             uids = pairs.data_of_item(seg_ix)[['seg1', 'seg2']].values
             assert np.all(np.sum(uids == segments[seg_ix].uid, axis=1) == 1)
 
-    # def get_pairing_X(self, segments: list[Segment]):
-    #     return [s[self.cfg.data.pairing.variable][:, :2] for s in segments]
+    @staticmethod
+    def make_pairing_X(pairing_variable: str, segments: list[Segment]):
+        def _to_2d(x):
+            return x[:, :2] if x.ndim >= 2 else np.c_[np.linspace(0, 1, len(x)), x]
+        return [_to_2d(s[pairing_variable]) for s in segments]
 
     @verbolize
     @staticmethod
