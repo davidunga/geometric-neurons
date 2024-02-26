@@ -15,6 +15,7 @@ from common.utils import sigproc
 import matplotlib.pyplot as plt
 from matplotlib.markers import MarkerStyle
 from screeninfo import get_monitors
+from common import symmetric_pairs
 
 DEFAULT_STYLE = {'marker': 'o', 'linestyle': '-', 'alpha': .75}
 STYLES = {
@@ -109,57 +110,85 @@ def compare_rigid_to_speed_dist(cfg: Config = None):
     as for similar shapes the rigid distance should correlate with speed distance
     """
 
-    n_anchors = 500
+    n_pairs = 1000
     seed = 1
+    pairs_by = "rand"
+    proc_kind = "none"
+    rng = np.random.default_rng(seed)
 
     if not cfg:
         cfg = Config.from_default()
 
-    sameness, pairs, segments = DataMgr(cfg.data).load_sameness()
+    sameness, pairs_data, segments = DataMgr(cfg.data).load_sameness()
     sameness.init_triplet_sampling()
     print(sameness.triplet_summary_string())
 
-    anchors, positives, negatives = sameness.sample_triplet_items(n_anchors, rand_seed=seed)
-    pairs, is_same = embedding_eval.make_triplet_pairs(anchors, positives, negatives)
+    if pairs_by == "triplets":
+
+        anchors, positives, negatives = sameness.sample_triplet_items(n_pairs // 2, rand_seed=seed)
+        pairs, is_same = embedding_eval.make_triplet_pairs(anchors, positives, negatives)
+
+        pair_indexes = []
+        for item1, item2 in pairs:
+            if item1 > item2:
+                item2, item1 = item1, item2
+            mask = (pairs_data.pairs['item1'] == item1) & (pairs_data.pairs['item2'] == item2)
+            index = pairs_data.pairs[mask].index[0]
+            pair_indexes.append(index)
+
+    elif pairs_by == "rand":
+        pair_indexes = rng.permutation(np.arange(len(pairs_data.pairs)))[:n_pairs]
+        pairs = pairs_data.pairs.loc[pair_indexes, ['item1', 'item2']].to_numpy()
+
+    else:
+        raise ValueError()
 
     spd = np.array([s.kin['EuSpd'] for s in segments]).mean(axis=1, keepdims=True)
     spd_dists = embedding_eval.pairs_dists(x=spd, pairs=pairs).squeeze()
 
-    rigid_procrustes = Procrustes(kind='offset')
+    procrustes = Procrustes(kind=proc_kind, error_metric='absavg')
     X = DataMgr.make_pairing_X('kin.EuSpd', segments)
     kinX = X # [s.kin['X'] for s in segments]
-    rigid_dists = np.array([rigid_procrustes(X[i], X[j])[0] for (i, j) in pairs]).squeeze()
 
-    normalized_rigid_dists = (rigid_dists - np.mean(rigid_dists)) / np.std(rigid_dists)
+    proc_dists = np.array([procrustes(X[i], X[j])[0] for (i, j) in pairs]).squeeze()
+
+    #rigid_dists = pairs_data['sameness_dist'].to_numpy()[pair_indexes]
+
+    normalized_rigid_dists = (proc_dists - np.mean(proc_dists)) / np.std(proc_dists)
     normalized_spd_dists = (spd_dists - np.mean(spd_dists)) / np.std(spd_dists)
 
     ixs = {
-        'rigid>speed': np.argmax(normalized_rigid_dists - normalized_spd_dists),
-        'rigid<speed': np.argmin(normalized_rigid_dists - normalized_spd_dists),
-        'rigid=speed': np.argmin(np.abs(normalized_rigid_dists - normalized_spd_dists)),
-        'min rigid': np.argmin(normalized_rigid_dists)
+        f'{proc_kind}>speed': np.argmax(normalized_rigid_dists - normalized_spd_dists),
+        f'{proc_kind}<speed': np.argmin(normalized_rigid_dists - normalized_spd_dists),
+        f'{proc_kind}=speed': np.argmin(np.abs(normalized_rigid_dists - normalized_spd_dists)),
+        f'min {proc_kind}': np.argmin(normalized_rigid_dists)
     }
     colors = 'red', 'limeGreen', 'gold', 'black'
 
-    rigid_dists = normalized_rigid_dists
+    proc_dists = normalized_rigid_dists
     spd_dists = normalized_spd_dists
 
     plt.figure()
-    plt.scatter(spd_dists, rigid_dists, alpha=.5)
+    plt.scatter(rng.permutation(spd_dists), proc_dists, alpha=.5)
+    plt.xlabel("Shuffled speed distances")
+    plt.ylabel(f"{proc_kind} distances")
+
+    plt.figure()
+    plt.scatter(spd_dists, proc_dists, alpha=.5)
     for k, (name, ix) in enumerate(ixs.items()):
-        plt.plot(spd_dists[ix], rigid_dists[ix], '^', color=colors[k], label=name)
+        plt.plot(spd_dists[ix], proc_dists[ix], '^', color=colors[k], label=name)
     plt.legend()
     plt.xlabel("Speed distances")
-    plt.ylabel("Rigid distances")
+    plt.ylabel(f"{proc_kind} distances")
 
     _, axs = plt.subplots(ncols=len(ixs))
     for k, (name, ix) in enumerate(ixs.items()):
         plt.sca(axs[k])
         i, j = pairs[ix]
-        XXj = rigid_procrustes(kinX[i], kinX[j])[2]
+        XXj = procrustes(kinX[i], kinX[j])[2]
         plt.plot(*kinX[i].T, 'bo-', label=f"Seg {i} Arclen={polytools.total_arclen(kinX[i]):2.3f}")
         plt.plot(*XXj.T, 'ro-', label=f"Seg {j} Arclen={polytools.total_arclen(kinX[j]):2.3f}")
-        plt.title(f"{name}\nSpeed Dist={spd_dists[ix]:2.3f}\nRigid Dist={rigid_dists[ix]:2.3f}")
+        plt.title(f"{name}\nSpeed Dist={spd_dists[ix]:2.3f}\nRigid Dist={proc_dists[ix]:2.3f}")
         plt.legend()
 
     plt.show()

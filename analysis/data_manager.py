@@ -39,15 +39,20 @@ class DataMgr:
     @verbolize()
     def load_pairing(self) -> SymmetricPairsData:
 
-        verbolize.open("loading pickle", inline=True)
-        pairs = pickle.load(self.pkl_path(DataConfig.PAIRING).open('rb'))
+        pkl = self.pkl_path(DataConfig.PAIRING)
+        verbolize.open("loading pickle " + str(pkl), inline=True)
+        pairs = pickle.load(pkl.open('rb'))
         verbolize.close()
 
-        if 'proc_dist_rank' not in pairs.data:
-            pairs.data['proc_dist_rank'] = pairs.data['proc_dist'].argsort().argsort()
+        sub_metric = self.cfg.pairing.sub_metric
+        sub_metric_rank_col = f"{sub_metric}_rank"
+        if sub_metric_rank_col not in pairs.data:
+            pairs.data[sub_metric_rank_col] = pairs.data[sub_metric].argsort().argsort()
             pickle.dump(pairs, self.pkl_path(DataConfig.PAIRING).open('wb'))
 
-        ranks = pairs.data['proc_dist_rank']
+        verbolize.inform(f"pairing by: {self.cfg.pairing.variable} with metric: {self.cfg.pairing.metric}.{sub_metric}")
+
+        ranks = pairs.data[sub_metric_rank_col]
         same_rank = int(self.cfg.pairing.same_pctl * len(ranks))
         notSame_rank = int(self.cfg.pairing.notSame_pctl * len(ranks))
         exclude_rank = int(self.cfg.pairing.exclude_pctl * len(ranks))
@@ -69,6 +74,7 @@ class DataMgr:
         sameness[(ranks < exclude_rank) & (ranks >= notSame_rank)] = -1
 
         pairs.data['sameness'] = sameness
+        pairs.data['sameness_dist'] = pairs.data[sub_metric]
 
         return pairs
 

@@ -5,11 +5,17 @@ from common.utils.typings import *
 
 class Procrustes:
 
-    KINDS = ('affine', 'ortho', 'rigid', 'offset', 'A')
+    KINDS = ('affine', 'ortho', 'rigid', 'offset', 'none')
 
-    def __init__(self, kind: str = 'affine'):
+    def __init__(self, kind: str = 'affine', error_metric: str = 'nmahal'):
         assert kind in self.KINDS, f"Unknown kind: {kind}"
         self.kind = kind
+        if error_metric.lower() in ('nmahal', 'normalized_mahalanobis'):
+            self.error_func = normalized_mahalanobis
+        elif error_metric.lower() in ('absolute_average', 'absavg'):
+            self.error_func = absolute_average
+        else:
+            raise ValueError('Unknown error metric')
 
     def __call__(self, X: NDArray, Y: NDArray) -> tuple[float, NpMatrix, NDArray]:
         """
@@ -35,17 +41,18 @@ class Procrustes:
         elif self.kind == 'offset':
             t = np.mean(X, axis=0) - np.mean(Y, axis=0)
             A = linalg.planar.build(t=t)
+        elif self.kind == 'none':
+            A = linalg.planar.build(t=0)
         else:
             raise ValueError('Unknown procrustes kind')
 
         AY = linalg.planar.apply(A, Y)
-        d = Procrustes.error(X, AY)
+        d = self.error(X, AY)
 
         return d, A, AY
 
-    @staticmethod
-    def error(X, Y) -> float:
-        return normalized_mahalanobis(X, Y)
+    def error(self, X, Y) -> float:
+        return self.error_func(X, Y)
 
     def _normalize(self, xx):
         loc = np.mean(xx, axis=0)
@@ -90,3 +97,7 @@ def normalized_mahalanobis(X, Y) -> float:
     delta = X - Y
     dists = np.sqrt(np.sum(np.dot(delta, inv_cov) * delta, axis=1))
     return dists.mean() / 2
+
+
+def absolute_average(X, Y) -> float:
+    return float(np.abs(np.mean(X - Y)))

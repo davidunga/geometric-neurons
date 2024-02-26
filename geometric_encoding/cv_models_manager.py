@@ -201,6 +201,3 @@ class CvModelsManager:
             f.write("\n\nCatalog:\n")
             f.write(df.to_string())
         print("Refreshed results file.")
-
-
-CvModelsManager.modify_configs({"data.pairing.metric": "YASS"})

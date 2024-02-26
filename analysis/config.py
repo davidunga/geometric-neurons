@@ -77,6 +77,8 @@ class DataConfig(Munch):
             return s
         assert level == DataConfig.OUTPUT
         addition = ""
+        if self.pairing.sub_metric != "proc_dist":
+            s += self.pairing.sub_metric.split("_")[0].title()
         if self.predictor.variable != "neural":
             addition += self.predictor.variable.replace(".", "").title().replace(" ", "")
         if self.predictor.shuffle:

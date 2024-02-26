@@ -16,6 +16,8 @@ from multiprocessing import Pool
 from datetime import datetime
 from glob import glob
 import os
+#import functools
+#print = functools.partial(print, flush=True)
 
 
 def make_and_save(cfg: DataConfig, force: bool = False) -> None:
@@ -176,21 +178,15 @@ class PairingCalcWorker:
                 name_str = "" if not self.name else (self.name + ": ")
                 print(f'  {name_str}{k}/{n_pairs} ({k/n_pairs:3.2%})')
 
-            proc_dist, A, _ = self.procrustes(self.X[i], self.X[j])
-            b, ang, t, is_reflected, ortho_score = linalg.planar.decompose(A)
-            scale = b if b > 1 else 1 / b
-            loc = float(np.linalg.norm(t))
+            proc_dist, _, AXj = self.procrustes(self.X[i], self.X[j])
+            absAvg_dist = float(np.abs(np.mean(self.X[i] - AXj)))
 
             items.append({
                 'pair_index': pair_ix,
                 'seg1': self.uids[i],
                 'seg2': self.uids[j],
-                'scale': scale,
-                'ang': ang,
-                'loc': loc,
                 'proc_dist': proc_dist,
-                'uniform_scale_score': ortho_score,
-                'reflected': is_reflected
+                'absAvg_dist': absAvg_dist
             })
 
             if pair_ix > 0 and pair_ix % dump_every == 0:
@@ -205,6 +201,45 @@ class PairingCalcWorker:
 
 def run_pairing_calc_worker(worker: PairingCalcWorker, start_ix: int, stop_ix: int):
     return worker(start_ix, stop_ix)
+
+
+def construct_dataframe_from_pkls(
+        pkls: list[PathLike] | PathLike,
+        delete_pkls_when_done: bool = False,
+        report_step: float = .05) -> SymmetricPairsData:
+
+    if not isinstance(pkls, list):
+        pkls = glob(str(Path(pkls) / "*.pkl"))
+
+    report_every = int(len(pkls) * report_step)
+
+    dists = []
+    ix = 0
+    for pkl_ix, pkl in enumerate(pkls):
+        if pkl_ix % report_every == 0:
+            print(f"{pkl_ix}/{len(pkls)} ({(pkl_ix + 1) / len(pkls):2.1%})")
+        worker_dists = pickle.load(open(pkl, 'rb'))
+        if not len(dists):
+            for _ in pkls:
+                dists += worker_dists
+        dists[ix: len(worker_dists)] = worker_dists
+        ix += len(worker_dists)
+    dists = dists[:ix]
+
+    dists = pd.DataFrame.from_records(dists)
+    dists.sort_values(by='pair_index', inplace=True, ignore_index=True)
+    assert all(dists.index == dists['pair_index'])
+    dists = dists.drop('pair_index', axis=1)
+    n = symmetric_pairs.num_items(len(dists))
+    assert len(set(dists["seg1"].tolist()).union(dists["seg2"].tolist())) == n
+    seg_pairs = SymmetricPairsData(data=dists, n=n)
+
+    if delete_pkls_when_done:
+        for pkl in pkls:
+            os.remove(pkl)
+
+    return seg_pairs
+
 
 
 def calc_pairing(segments: list[Segment],
@@ -250,25 +285,9 @@ def calc_pairing(segments: list[Segment],
             pool.starmap(run_pairing_calc_worker, args)
 
     print("Workers are done. Temp files are under:", str(dump_root))
+
     print("Constructing dataframe")
-
-    pkls = glob(str(dump_root / "*.pkl"))
-    dists = []
-    for pkl in pkls:
-        worker_dists = pickle.load(open(pkl, 'rb'))
-        dists += worker_dists
-
-    dists = pd.DataFrame.from_records(dists)
-    dists.sort_values(by='pair_index', inplace=True, ignore_index=True)
-    assert all(dists.index == dists['pair_index'])
-    dists = dists.drop('pair_index', axis=1)
-    assert dists["seg1"].tolist() == [segments[i].uid for i, _ in pairs]
-    assert dists["seg2"].tolist() == [segments[i].uid for _, i in pairs]
-    seg_pairs = SymmetricPairsData(data=dists, n=len(segments))
-
-    for pkl in pkls:
-        os.remove(pkl)
-
+    seg_pairs = construct_dataframe_from_pkls(dump_root, delete_pkls_when_done=True)
     print("Done.")
 
     return seg_pairs
@@ -276,7 +295,7 @@ def calc_pairing(segments: list[Segment],
 
 def run__make_and_save():
     force = False
-    for pairing_metric in ['rigid']:
+    for pairing_metric in ['none']:
         for bin_sz in [.01]:
             for dataset in ['TP_RS']:
                 data_cfg = Config.from_default().data
@@ -287,5 +306,6 @@ def run__make_and_save():
 
 
 if __name__ == "__main__":
+    #construct_dataframe_from_pkls("/Users/davidu/geometric-neurons/resources/data/tmp/kinX-ortho-25357881-20240206-124339")
     run__make_and_save()
     pass

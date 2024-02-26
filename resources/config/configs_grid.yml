@@ -8,7 +8,8 @@ data:
       radcurv_bounds: [[.2, 5]]
     pairing:
       variable: kin.EuSpd
-      metric: [rigid]
+      metric: [none]
+      sub_metric: [absAvg_dist]
       same_pctl: .05
       notSame_pctl: .2
       exclude_pctl: .8
