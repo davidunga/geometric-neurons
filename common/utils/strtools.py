@@ -17,14 +17,18 @@ def parts(**kwargs) -> str:
     return ", ".join(tokens)
 
 
-def part(p, q=None, show_tot: bool = True) -> str:
+def part(p, q=None, show_tot: bool = True, pr: int = 2) -> str:
 
     if q is None:
         q = len(p)
         p = int(np.sum(p))
 
-    pcnt = f"{p / q * 100:3.2f}%"
+    pcnt = f"{p / q * 100:{get_fmt(3, pr)}}%"
     if show_tot:
         return f"{p}/{q} ({pcnt})"
     else:
         return f"{p} ({pcnt})"
+
+
+def get_fmt(m: int, p: int) -> str:
+    return f"{m}.{p}f"

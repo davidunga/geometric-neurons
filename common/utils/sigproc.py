@@ -1,10 +1,18 @@
 import numpy as np
 
 
-def reduce_rows(a, win_sz: int, fn='mean'):
-    # non-overlapping reduction 0-th dimension of array
-    if isinstance(fn, str): fn = getattr(np, fn)
-    return np.array([fn(a[i: i + win_sz], axis=0) for i in range(0, len(a) - win_sz + 1, win_sz)])
+def reduce_rows(a, win_sz: int):
+    """
+    Args:
+        a: 2d array
+        win_sz: window size
+    Returns:
+        2d array of shape (a.shape[0] // win_sz, a.shape[1])
+    """
+    new_len = a.shape[0] // win_sz
+    sample_ixs = np.arange(new_len) * win_sz
+    ret = np.stack([np.mean(a[i: i + win_sz], axis=0) for i in sample_ixs], axis=0)
+    return ret, sample_ixs
 
 
 def scales_and_offsets(X, axis, kind='std'):
@@ -29,7 +37,11 @@ def normalize(X, axis, kind: str = 'std', inplace: bool = False):
     if not inplace:
         X = X.copy()
     X -= offset
-    X /= scale
+    X /= np.maximum(scale, 1e-8)
     return X
 
 
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    x = np.random.default_rng(1).random(size=(20, 30))
+    reduce_rows(x, 3)

@@ -54,37 +54,36 @@ class Config:
 class DataConfig(Munch):
 
     class Level(str): pass
-    BASE = Level("base")
+    TRIALS = Level("trials")
     SEGMENTS = Level("segments")
     PAIRING = Level("pairing")
     OUTPUT = Level("output")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        assert DataConfig.BASE in self
+        assert DataConfig.TRIALS in self
 
     def str(self, level: Level = None):
         if level is None:
             level = DataConfig.PAIRING
-        s = f"{self.base.name} bin{round(1000 * self.base.bin_sz):d} lag{round(1000 * self.base.lag):d}"
-        if level == DataConfig.BASE:
+        s = f"{self.trials.name} bin{round(1000 * self.trials.bin_sz):d} lag{round(1000 * self.trials.lag):d}"
+        if level == DataConfig.TRIALS:
             return s
         s += f" dur{round(1000 * self.segments.dur)}"
         if level == DataConfig.SEGMENTS:
             return s
-        s += " pair" + f"{self.pairing.variable} {self.pairing.metric}".replace(".", "").title().replace(" ", "")
+        s += f" {self.pairing.align_kind}-{self.pairing.variable}".replace(".", "")
         if level == DataConfig.PAIRING:
             return s
         assert level == DataConfig.OUTPUT
-        addition = ""
-        if self.pairing.sub_metric != "proc_dist":
-            s += self.pairing.sub_metric.split("_")[0].title()
-        if self.predictor.variable != "neural":
-            addition += self.predictor.variable.replace(".", "").title().replace(" ", "")
-        if self.predictor.shuffle:
-            addition += "Shuff"
-        if addition:
-            s += f" pred{addition}"
+        s += "-" + self.pairing.dist_metric
+        pred_token = ""
+        if self.inputs.variable != "neural":
+            pred_token += self.inputs.variable.replace(".", "").title().replace(" ", "")
+        if self.pairing.shuffle:
+            pred_token += "Shuff"
+        if pred_token:
+            s += f" pred{pred_token}"
         return s
 
 

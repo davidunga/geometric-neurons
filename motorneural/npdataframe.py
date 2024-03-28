@@ -1,23 +1,32 @@
 from typing import Sequence
 import pandas as pd
 import numpy as np
-from motorneural.uniformly_sampled import UniformGrid
+import numpy.typing
 from common.utils.sigproc import reduce_rows
 
 
 class NpDataFrame:
 
-    __slots__ = ['_df', '_t', '_aliases', '_meta']
+    __slots__ = ['_df', '_t', '_aliases', '_meta', '_events']
 
-    def __init__(self, df: pd.DataFrame, aliases: dict = None, meta: dict = None, t: Sequence[float] = None):
+    def __init__(self, df: pd.DataFrame, aliases: dict = None, meta: dict = None, t: Sequence[float] = None,
+                 events: dict[str, int] = None):
         self._df = df
+        self._events = events if events else {}
         self._t = np.asarray(t if t is not None else [])
         self._aliases = {} if aliases is None else aliases
         self._meta = {} if meta is None else meta
+        # --
+
         self._validate()
+
+    @property
+    def df(self) -> pd.DataFrame:
+        return self._df
 
     def _validate(self):
         assert 't' not in self._df.columns
+        assert all(0 <= i < self._df.shape[0] for i in self._events.values())
         if self._t is not None:
             assert len(self._t) == self._df.shape[0]
 
@@ -29,25 +38,50 @@ class NpDataFrame:
             setattr(self, k, v)
         self._validate()
 
+    @property
+    def events(self) -> dict[str, int]:
+        return self._events
+
+    @events.setter
+    def events(self, events_dict: dict[str, int], reorder: bool = True):
+        if reorder:
+            self._events = {k: v for k, v in sorted(events_dict.items(), key=lambda kv: kv[1])}
+        else:
+            self._events = events_dict
+
+    @property
+    def meta(self):
+        return self._meta
+
+    @meta.setter
+    def meta(self, meta_dict):
+        self._meta = meta_dict
+
     def get_slice(self, *args):
         slc = slice(*args)
+        events = {name: i - slc.start for name, i in self._events.items() if slc.start <= i < slc.stop}
         return type(self)(self._df.iloc[slc], aliases=self._aliases, meta=self._meta,
-                          t=self._t[slc] if self._t is not None else None)
+                          t=self._t[slc] if self._t is not None else None, events=events)
 
     def get_flat_series(self) -> pd.Series:
         s = self._df.stack()
         s.index = [f'{col_name}.{index}' for index, col_name in s.index]
         return s
 
-    def get_binned(self, *args, win_sz: int = None, bin_sz: float = None):
-        assert (win_sz is None) ^ (bin_sz is None)
+    def get_binned(self, bin_sz: float = None, factor: float = None):
+        if bin_sz is None and factor is None:
+            return self
         if bin_sz is not None:
-            win_sz = int(.5 + bin_sz / self.bin_size)
-            assert abs(win_sz - bin_sz / self.bin_size) < .2, f"bin_sz must be an integer multiply of current bin " \
-                                                              f"size. got={bin_sz / self.bin_size} instead of {win_sz}"
-        values = reduce_rows(self[:], win_sz, 'mean')
-        t = None if self._t is None else reduce_rows(self._t, win_sz, 'mean')
-        return type(self)(pd.DataFrame(values, columns=self.columns), aliases=self._aliases, meta=self._meta, t=t)
+            assert factor is None
+            factor = bin_sz / self.bin_size
+        win_sz = int(round(factor))
+        values, sampled_ixs = reduce_rows(self[:], win_sz)
+        new_len = len(self) // win_sz
+        assert len(values) == new_len
+        t = None if self._t is None else self._t[sampled_ixs]
+        events = {name: i // win_sz for name, i in self._events.items() if i < new_len * win_sz}
+        return type(self)(pd.DataFrame(values, columns=self.columns), aliases=self._aliases,
+                          meta=self._meta, t=t, events=events)
 
     @property
     def columns(self):
@@ -97,4 +131,10 @@ class NpDataFrame:
         return dt
 
     def time2index(self, tm: float) -> int:
-        return np.searchsorted(self.t, tm)
+        return min(np.searchsorted(self.t, tm), len(self) - 1)
+
+    @property
+    def event_times(self) -> dict[str, float]:
+        bin_size = self.bin_size
+        return {name: i * bin_size for name, i in self._events.items()}
+

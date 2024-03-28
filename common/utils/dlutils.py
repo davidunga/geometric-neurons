@@ -105,7 +105,7 @@ class SnapshotMgr:
 
     def wipe(self, tags: list[str] = None):
         snapshots = self._fetch_all_snapshots()
-        tags = tags if tags else snapshots.keys()
+        tags = tags if tags else list(snapshots.keys())
         for tag in tags:
             del snapshots[tag]
         if not snapshots:

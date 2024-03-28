@@ -1,47 +1,48 @@
 import pandas as pd
-from motorneural.datasets.hatsopoulos import make_hatso_data, HATSO_DATASET_SPECS
-from motorneural.data import Segment, NeuralData, Data
+from motorneural.datasets.hatsopoulos import make_hatso_data, HATSO_DATASET_SPECS, get_hatso_datasets
+from motorneural.data import Segment, Trial, validate_data_slices
 import numpy as np
 import matplotlib.pyplot as plt
-from common.utils.procrustes import Procrustes
-from common.utils import linalg
 import paths
-import pickle
+from common.utils import picklestore as pickle
 from common.utils.typings import *
-from common.symmetric_pairs import SymmetricPairsData
 from common import symmetric_pairs
 from analysis.config import DataConfig, Config
-from analysis.data_manager import DataMgr
+from analysis.data_manager import DataMgr, convert_segment_uid_to_num_inplace
 from multiprocessing import Pool
 from datetime import datetime
 from glob import glob
 import os
-#import functools
-#print = functools.partial(print, flush=True)
+from common.utils.planar_align import PlanarAligner
+from common.utils.distance_metrics import get_metric_func
 
 
-def make_and_save(cfg: DataConfig, force: bool = False) -> None:
-
-    loaded = {}
-
-    def _calc_level(level: DataConfig.Level):
-        if level == DataConfig.BASE:
-            return make_base_data(dataset=cfg.base.name, lag=cfg.base.lag, bin_sz=cfg.base.bin_sz)
-        elif level == DataConfig.SEGMENTS:
-            return extract_segments(data=loaded[DataConfig.BASE], dur=cfg.segments.dur,
-                                    radcurv_bounds=cfg.segments.radcurv_bounds)
-        elif level == DataConfig.PAIRING:
-            return calc_pairing(segments=loaded[DataConfig.SEGMENTS], pairing_variable=cfg.pairing.variable,
-                                pairing_metric=cfg.pairing.metric, n_workers=8)
-        else:
-            raise ValueError("Unknown level")
+def make_and_save(cfg: DataConfig, force: int = 0, upto: DataConfig.Level = None) -> None:
 
     data_mgr = DataMgr(cfg)
-    for level in [DataConfig.BASE, DataConfig.SEGMENTS, DataConfig.PAIRING]:
-        pkl = data_mgr.pkl_path(level)
-        if force or not pkl.exists():
-            pickle.dump(_calc_level(level), pkl.open('wb'))
-        loaded[level] = pickle.load(pkl.open('rb'))
+
+    trials_pkl = data_mgr.pkl_path(DataConfig.TRIALS)
+    if force > 2 or not trials_pkl.exists():
+        trials, meta = make_trials_data(dataset=cfg.trials.name, lag=cfg.trials.lag, bin_sz=cfg.trials.bin_sz)
+        pickle.dump([trials, meta], trials_pkl)
+    trials, meta = data_mgr.load_trials()
+    if upto == DataConfig.TRIALS:
+        return
+
+    segments_pkl = data_mgr.pkl_path(DataConfig.SEGMENTS)
+    if force > 1 or not segments_pkl.exists():
+        segments = extract_segments(trials=trials, dur=cfg.segments.dur, radcurv_bounds=cfg.segments.radcurv_bounds)
+        pickle.dump(segments, segments_pkl)
+    segments = data_mgr.load_segments()
+    if upto == DataConfig.SEGMENTS:
+        return
+
+    pairing_pkl = data_mgr.pkl_path(DataConfig.PAIRING)
+    if force > 0 or not pairing_pkl.exists():
+        pairing = calc_pairing(segments=segments, variable=cfg.pairing.variable,
+                               align_kind=cfg.pairing.align_kind, n_workers=8)
+        pickle.store(pairing, str(pairing_pkl))
+    pairing = data_mgr.load_pairing()
 
     return
 
@@ -49,17 +50,19 @@ def make_and_save(cfg: DataConfig, force: bool = False) -> None:
 # ====================================================================================
 
 
-def make_base_data(dataset: str, lag: float, bin_sz: float) -> Data:
+def make_trials_data(dataset: str, lag: float, bin_sz: float) -> tuple[list[Trial], dict]:
     assert abs(lag) <= 1, "Lag should be in seconds"
     assert .001 < bin_sz <= 1, "Bin size should be in seconds"
     if dataset in HATSO_DATASET_SPECS:
-        data = make_hatso_data(paths.GLOBAL_DATA_DIR / "hatsopoulos", dataset, lag=lag, bin_sz=bin_sz)
+        trials, meta = make_hatso_data(paths.GLOBAL_DATA_DIR / "hatsopoulos", dataset, lag=lag, bin_sz=bin_sz)
     else:
         raise ValueError("Cannot determine data source")
-    return data
+    return trials, meta
 
 
-def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]) -> list[Segment]:
+def extract_segments(trials: list[Trial], dur: float, radcurv_bounds: tuple[float, float]) -> list[Segment]:
+
+    validate_data_slices(trials)
 
     SANE_SEGMENT_SIZE_RANGE = 10, 50
     assert len(radcurv_bounds) == 2 and radcurv_bounds[0] < radcurv_bounds[1]
@@ -70,20 +73,20 @@ def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]
     DBG_PLOT = False
     DRYRUN = False
 
-    r = int(round(.5 * dur / data.bin_sz))
+    r = int(round(.5 * dur / trials[0].bin_size))
     segment_size = 2 * r + 1
     assert SANE_SEGMENT_SIZE_RANGE[0] < segment_size < SANE_SEGMENT_SIZE_RANGE[1]
 
-    print(f"Extracting segments from {len(data)} trials..")
+    print(f"Extracting segments from {len(trials)} trials..")
 
     segments = []
-    for trial in data:
+    for trial in trials:
 
         if DRYRUN and trial.ix > 100:
             break
 
         if trial.ix % 100 == 0:
-            print(f'{trial.ix + 1}/{len(data)}')
+            print(f'{trial.ix + 1}/{len(trials)}')
 
         if DBG_PLOT:
             plt.plot(*trial.kin.X.T, 'k')
@@ -109,7 +112,7 @@ def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]
             k2_val = k2[ix]
             k2[ix - r: ix + r + 1] = 0
 
-            segment = trial.get_segment(ix - r, ix + r + 1)
+            segment = trial.get_segment(ix - r, ix + r + 1, ix=len(segments))
             assert len(segment) == segment_size
             segments.append(segment)
 
@@ -124,7 +127,7 @@ def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]
 
         if DBG_PLOT: plt.show()
 
-    n_trials = len(set(s.trial_ix for s in segments))
+    n_trials = len(set(s.parent for s in segments))
     print(f"Done. Extracted {len(segments)} segments from {n_trials} trials. "
           f"That's {len(segments) / n_trials:2.2f} segment/trial on average.")
     return segments
@@ -132,27 +135,30 @@ def extract_segments(data: Data, dur: float, radcurv_bounds: tuple[float, float]
 
 class PairingCalcWorker:
 
-    def __init__(self, X: NpPoints, uids: list[str], procrustes: Procrustes, dump_root: Path | str,
-                 name: str = "", report_every: int | float = .05, dump_every: int | float = .05):
+    def __init__(self, X: NpPoints,
+                 uids: list[str],
+                 aligner: PlanarAligner,
+                 dump_root: Path | str,
+                 name: str = "",
+                 report_every: int | float = .05,
+                 dump_every: int | float = .05):
 
         self.X = X
         self.uids = uids
-        self.procrustes = procrustes
+        self.aligner = aligner
         self.dump_root = Path(dump_root)
         self.name = name
         self.report_every = report_every
         self.dump_every = dump_every
-
-    @classmethod
-    def from_segments(cls, segments: list[Segment], pairing_variable: str, **kwargs):
-        X = DataMgr.make_pairing_X(pairing_variable, segments)
-        return cls(X=X, uids=[s.uid for s in segments], **kwargs)
+        self.metrics = ['nmahal', 'absavg']
 
     def __call__(self, start_ix: int = 0, stop_ix: int = None):
 
         n_pairs_tot = symmetric_pairs.num_pairs(len(self.X))
         stop_ix = n_pairs_tot if stop_ix is None else stop_ix
         n_pairs = stop_ix - start_ix
+
+        metric_funcs = {metric: get_metric_func(metric) for metric in self.metrics}
 
         def _dump(items_):
             n_digits = str(len(str(n_pairs_tot)) + 1)
@@ -164,10 +170,8 @@ class PairingCalcWorker:
         dump_every = int(self.dump_every * n_pairs) if self.dump_every < 1 else self.dump_every
 
         items = []
-        pair_ix = -1
-        for i, j in symmetric_pairs.iter_pairs(len(self.X)):
+        for pair_ix, (i, j) in enumerate(symmetric_pairs.iter_pairs(len(self.X))):
 
-            pair_ix += 1
             if pair_ix < start_ix:
                 continue
             if pair_ix == stop_ix:
@@ -178,16 +182,16 @@ class PairingCalcWorker:
                 name_str = "" if not self.name else (self.name + ": ")
                 print(f'  {name_str}{k}/{n_pairs} ({k/n_pairs:3.2%})')
 
-            proc_dist, _, AXj = self.procrustes(self.X[i], self.X[j])
-            absAvg_dist = float(np.abs(np.mean(self.X[i] - AXj)))
+            AXj, _ = self.aligner(self.X[i], self.X[j])
 
-            items.append({
-                'pair_index': pair_ix,
-                'seg1': self.uids[i],
-                'seg2': self.uids[j],
-                'proc_dist': proc_dist,
-                'absAvg_dist': absAvg_dist
-            })
+            item = {'pair_index': pair_ix,
+                    'seg1': self.uids[i],
+                    'seg2': self.uids[j]}
+
+            for metric_name, metric_func in metric_funcs.items():
+                item[metric_name] = metric_func(self.X[i], AXj)
+
+            items.append(item)
 
             if pair_ix > 0 and pair_ix % dump_every == 0:
                 _dump(items)
@@ -203,10 +207,11 @@ def run_pairing_calc_worker(worker: PairingCalcWorker, start_ix: int, stop_ix: i
     return worker(start_ix, stop_ix)
 
 
-def construct_dataframe_from_pkls(
+def construct_dataframes_from_pkls(
         pkls: list[PathLike] | PathLike,
+        segments: list[Segment],
         delete_pkls_when_done: bool = False,
-        report_step: float = .05) -> SymmetricPairsData:
+        report_step: float = .05) -> dict[str, pd.DataFrame]:
 
     if not isinstance(pkls, list):
         pkls = glob(str(Path(pkls) / "*.pkl"))
@@ -229,27 +234,33 @@ def construct_dataframe_from_pkls(
     dists = pd.DataFrame.from_records(dists)
     dists.sort_values(by='pair_index', inplace=True, ignore_index=True)
     assert all(dists.index == dists['pair_index'])
-    dists = dists.drop('pair_index', axis=1)
-    n = symmetric_pairs.num_items(len(dists))
-    assert len(set(dists["seg1"].tolist()).union(dists["seg2"].tolist())) == n
-    seg_pairs = SymmetricPairsData(data=dists, n=n)
+    assert symmetric_pairs.num_items(len(dists)) == len(segments)
+
+    convert_segment_uid_to_num_inplace(dists, uids=[s['uid'] for s in segments])
+
+    dists = dists.drop("pair_index", axis=1)
+    metrics = [col for col in dists.columns if col not in ('seg1', 'seg2')]
+    result = {}
+    for metric in metrics:
+        df = dists[['seg1', 'seg2', metric]].copy().rename(columns={metric: 'dist'})
+        df['rank'] = df['dist'].to_numpy().argsort().argsort()
+        result[metric] = df
 
     if delete_pkls_when_done:
         for pkl in pkls:
             os.remove(pkl)
 
-    return seg_pairs
-
+    return result
 
 
 def calc_pairing(segments: list[Segment],
-                 pairing_variable: str,
-                 pairing_metric: str,
-                 n_workers: int = 8) -> SymmetricPairsData:
+                 variable: str,
+                 align_kind: str,
+                 n_workers: int = 8) -> dict[str, pd.DataFrame]:
 
     print(f"Calculating pairing over {len(segments)} segments")
-    print("Pairing metric=", pairing_metric)
-    print("Pairing variable=", pairing_variable)
+    print("Pairing alignment kind=", align_kind)
+    print("Pairing variable=", variable)
 
     pairs = list(symmetric_pairs.iter_pairs(len(segments)))
 
@@ -257,10 +268,10 @@ def calc_pairing(segments: list[Segment],
     print(f"Preparing {n_workers} workers")
 
     split_ixs = np.round(np.linspace(0, len(pairs), n_workers + 1)).astype(int)
-    X = DataMgr.make_pairing_X(pairing_variable, segments)
+    X = DataMgr.make_pairing_trajectories(variable, segments)
 
     time_str = datetime.now().strftime("%Y%m%d-%H%M%S")
-    dump_root = paths.DATA_DIR / "tmp" / f"{pairing_variable}-{pairing_metric}-{len(pairs)}-{time_str}".replace('.', '')
+    dump_root = paths.DATA_DIR / "tmp" / f"{variable}-{align_kind}-{len(pairs)}-{time_str}".replace('.', '')
     dump_root.mkdir(exist_ok=False, parents=True)
     print("Dumping to:", str(dump_root))
 
@@ -270,7 +281,7 @@ def calc_pairing(segments: list[Segment],
         stop_ix = split_ixs[worker_ix + 1]
         worker = PairingCalcWorker(X=X.copy(),
                                    uids=[s.uid for s in segments],
-                                   procrustes=Procrustes(kind=pairing_metric),
+                                   aligner=PlanarAligner(kind=align_kind),
                                    name=f"Worker{worker_ix}",
                                    dump_root=dump_root)
         args.append((worker, start_ix, stop_ix))
@@ -287,22 +298,27 @@ def calc_pairing(segments: list[Segment],
     print("Workers are done. Temp files are under:", str(dump_root))
 
     print("Constructing dataframe")
-    seg_pairs = construct_dataframe_from_pkls(dump_root, delete_pkls_when_done=True)
+    metric_dfs = construct_dataframes_from_pkls(dump_root, segments, delete_pkls_when_done=True)
     print("Done.")
 
-    return seg_pairs
+    return metric_dfs
 
 
 def run__make_and_save():
-    force = False
-    for pairing_metric in ['none']:
-        for bin_sz in [.01]:
-            for dataset in ['TP_RS']:
+    force = 3
+    # datasets = ['TP_RS']
+    datasets = get_hatso_datasets(task='CO')
+    upto = DataConfig.TRIALS
+    bin_sizes = [None]
+    for align_kind in ['affine']:
+        for bin_sz in bin_sizes:
+            for dataset in datasets:
                 data_cfg = Config.from_default().data
-                data_cfg.base.name = dataset
-                data_cfg.base.bin_sz = bin_sz
-                data_cfg.pairing.metric = pairing_metric
-                make_and_save(data_cfg, force=force)
+                data_cfg.trials.name = dataset
+                if bin_sz is not None:
+                    data_cfg.trials.bin_sz = bin_sz
+                data_cfg.pairing.align_kind = align_kind
+                make_and_save(data_cfg, force=force, upto=upto)
 
 
 if __name__ == "__main__":

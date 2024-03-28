@@ -4,10 +4,13 @@ from common.utils.typings import *
 from sklearn import metrics
 from scipy import stats
 from dataclasses import dataclass
+from common.utils import strtools
 
 
 @dataclass
 class EmbeddingEvalResult:
+
+    _tscore_alpha = .01
 
     fpr: NpVec[float]
     tpr: NpVec[float]
@@ -34,7 +37,7 @@ class EmbeddingEvalResult:
 
     def __post_init__(self):
         self._auc = metrics.auc(self.fpr, self.tpr)
-        self._tscore = 0 if self.ttest.pvalue > .05 else self.ttest.statistic
+        self._tscore = 0.0 if self.ttest.pvalue > self._tscore_alpha else self.ttest.statistic
 
     def __str__(self) -> str:
         loss_str = f", loss={self.loss:2.4f}" if self.loss is not None else ""
@@ -50,8 +53,7 @@ class EmbeddingLoss:
 
     def __call__(self, p_dists: NpVec[float], n_dists: NpVec[float]) -> float:
         if self.kind == "triplet":
-            d = p_dists - n_dists + self.margin
-            d[d < 0] = 0
+            d = np.maximum(p_dists - n_dists + self.margin, 0)
             loss = np.mean(d)
         elif self.kind == "contrastive":
             positive_part = np.square(p_dists).sum()
@@ -70,12 +72,14 @@ class EmbeddingEvaluator:
     is_same: NpVec[bool]
     loss_func: EmbeddingLoss | None
 
-    def __init__(self, vecs: NpPoints | torch.TensorType, paired_items: list[tuple[int, int]], is_same: NpVec[bool],
+    def __init__(self, vecs: NpPoints | torch.TensorType | None,
+                 paired_items: list[tuple[int, int]], is_same: NpVec[bool],
+                 n: int = None,
                  loss_margin: float = None, loss_kind: str = "triplet", loss_func: Callable = None):
 
         """
         Args:
-            vecs: vectors (not embedded)
+            vecs: vectors (not embedded). if None, must be provided each evaluate() call
             paired_items: pairing of vectors
             is_same: indicates if pair is 'same' or 'not same'
             loss_margin: if provided, loss function is constructed from loss kind + this margin
@@ -87,40 +91,46 @@ class EmbeddingEvaluator:
             assert loss_func is None, "Provide either loss margin or loss function, not both"
             loss_func = EmbeddingLoss(kind=loss_kind, margin=loss_margin)
 
+        if vecs is None:
+            assert n is not None
+        elif n is None:
+            n = len(vecs)
+
         self.vecs = vecs
         self.is_same = is_same
         self.paired_items = paired_items
         self.loss_func = loss_func
+        self.n = n
+        self.included_items = sorted(list(set(item for pair in self.paired_items for item in pair)))
 
+        assert (self.vecs is None) or (self.n == len(self.vecs))
+        assert self.included_items[-1] < n
+        assert self.included_items[0] >= 0
         assert len(self.paired_items) == len(self.is_same)
 
     @classmethod
-    def from_triplets(cls, vecs: NpPoints | torch.TensorType,
-                      anchors: list[int], positives: list[int], negatives: list[int], **kwargs):
-        """
-        Args:
-            vecs: vectors (not embedded)
-            anchors: ..
-            positives: ..
-            negatives: ..
-                indices of anchor/positive/negative vectors,
-                must all be of the same length
-            **kwargs: passed to constructor
-        """
-        paired_items, is_same = make_triplet_pairs(anchors, positives, negatives)
+    def from_triplets(cls, vecs: NpPoints | torch.TensorType | None, triplets: NDArray[int], **kwargs):
+        paired_items, is_same = merge_pos_neg(triplets[:, [0, 1]], triplets[:, [0, 2]])
         return cls(vecs=vecs, paired_items=paired_items, is_same=is_same, **kwargs)
 
-    def evaluate(self, embedder: torch.nn.Module | Callable = None) -> EmbeddingEvalResult:
+    def evaluate(self, embedder: torch.nn.Module | Callable = None, inputs: torch.Tensor = None) -> EmbeddingEvalResult:
+
+        assert (self.vecs is None) ^ (inputs is None)
+
+        if inputs is None:
+            inputs = self.vecs
+
+        assert len(inputs) == self.n
 
         if embedder is None:
-            embedded_vecs = self.vecs
+            embedded_vecs = inputs
         elif isinstance(embedder, torch.nn.Module):
             is_training = embedder.training
             embedder.train(False)
-            embedded_vecs = embedder(self.vecs)
+            embedded_vecs = embedder(inputs)
             embedder.train(is_training)
         else:
-            embedded_vecs = embedder(self.vecs)
+            embedded_vecs = embedder(inputs)
 
         try:
             embedded_vecs = embedded_vecs.detach().cpu().numpy()
@@ -134,6 +144,11 @@ class EmbeddingEvaluator:
             loss_func=self.loss_func)
 
         return result
+
+    def summary_string(self) -> str:
+        s = "Included items: " + strtools.part(len(self.included_items), self.n)
+        s += ", Pairs: " + strtools.parts(Same=self.is_same.sum(), notSame=(~self.is_same).sum())
+        return s
 
 
 def evaluate_embedded_dists(

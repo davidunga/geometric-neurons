@@ -1,4 +1,5 @@
-
+from common.utils.devtools import verbolize
+from common.utils import strtools
 from motorneural.typetools import *
 from motorneural.neural import NeuralData
 from motorneural.motor import KinData
@@ -7,59 +8,74 @@ import numpy as np
 from sklearn.decomposition import PCA
 import pandas as pd
 
-# ----------------------------------
-
 
 @dataclass
-class DatasetMeta:
-    """ Dataset metadata """
-    name: str
-    task: str
-    monkey: str
-    sites: Set[str]
-    file: str
+class DataSlice:
 
-
-
-@dataclass
-class Event:
-    """ Neural/kinematic event time and index """
-    name: str
-    tm: float
     ix: int
-    is_neural: bool
-
-# ----------------------------------
-
-
-@dataclass
-class Segment:
-
-    trial_ix: int = None
-    kin: KinData = None
-    neural: NeuralData = None
+    kin: KinData
+    neural: NeuralData
     neural_pc: NeuralData = None
-    uid: str = 'auto'
+    parent: str = None
+    properties: dict = None
+
+    _lag: float = None
+
+    def __str__(self):
+        name = self.__class__.__name__
+        return f"{name} {self.uid} dur={self.duration:2.3f} len={len(self)} bin={self.bin_size:2.3f} " \
+               f"neurons={self.neural.num_neurons} lag={self.lag:2.3f}"
+
+    def __repr__(self):
+        return str(self)
 
     def __post_init__(self):
-        assert len(self.kin) == len(self.neural) == len(self.neural_pc)
-        assert np.isclose(self.kin.duration, self.neural.duration)
-        assert np.isclose(self.kin.duration, self.neural_pc.duration)
-        if self.uid == 'auto':
-            self.uid = f"{self.trial_ix:03d}-{self.kin.t.mean():06.2f}"
+        self._lag = float(np.median(self.kin.t - self.neural.t))
+        self.properties = {} if not self.properties else self.properties
+        self._validate()
 
-    def get_slice(self, *args):
-        kin = self.kin.get_slice(*args)
-        neural = self.neural.get_slice(*args)
-        neural_pc = self.neural_pc.get_slice(*args)
-        return Segment(trial_ix=self.trial_ix, kin=kin, neural=neural, neural_pc=neural_pc)
+    def get_segment(self, ifrom: int, ito: int, ix: int = None, parent: str = None):
+        kin = self.kin.get_slice(ifrom, ito)
+        neural = self.neural.get_slice(ifrom, ito)
+        neural_pc = self.neural_pc.get_slice(ifrom, ito)
+        ix = ifrom if ix is None else ix
+        parent = self.uid if parent is None else parent
+        return Segment(kin=kin, neural=neural, neural_pc=neural_pc, ix=ix,
+                       parent=parent, properties=self.properties)
+
+    def get_binned(self, **kwargs):
+        kin = self.kin.get_binned(**kwargs)
+        neural = self.neural.get_binned(**kwargs)
+        neural_pc = self.neural_pc.get_binned(**kwargs)
+        return self.__class__(kin=kin, neural=neural, neural_pc=neural_pc, ix=self.ix,
+                              parent=self.parent, properties=self.properties)
 
     def __len__(self):
         return len(self.kin)
 
     @property
+    def uid(self) -> str:
+        return f"{self.ix}/{self.parent}"
+
+    @property
+    def dataset(self) -> str:
+        return self.parent.split('/')[-1]
+
+    @property
+    def bin_size(self) -> float:
+        return self.kin.bin_size
+
+    @property
+    def lag(self) -> float:
+        return self._lag
+
+    @property
     def duration(self) -> float:
         return self.kin.duration
+
+    @property
+    def events(self) -> dict[str, int]:
+        return {**self.kin.events, **self.neural.events, **self.neural_pc.events}
 
     def __getitem__(self, item: str):
         if '.' in item:
@@ -69,190 +85,144 @@ class Segment:
             ret = getattr(self, item)
         return ret
 
-
-@dataclass
-class Trial:
-    """ Single trial data """
-
-    dataset: str
-    ix: int
-    lag: float
-    bin_sz: float
-    kin: KinData = None
-    neural: NeuralData = None
-    neural_pc: NeuralData = None
-
-    _properties: dict[str, Any] = field(default_factory=dict)
-    _events: dict[str, Event] = field(default_factory=dict)
-
-    def get_segment(self, *args):
-        kin = self.kin.get_slice(*args)
-        neural = self.neural.get_slice(*args)
-        neural_pc = self.neural_pc.get_slice(*args)
-        return Segment(trial_ix=self.ix, kin=kin, neural=neural, neural_pc=neural_pc)
-
-    @property
-    def duration(self):
-        if not ("end" in self and "st" in self):
-            raise AssertionError("Start and end trial events are not defined")
-        return self.end - self.st
-
-    def __len__(self):
-        return len(self.kin)
-
-    @property
-    def base_data_params(self) -> dict:
-        return {'name': self.dataset, 'lag': self.lag, 'bin_sz': self.bin_sz}
-
-    @property
-    def properties(self) -> dict[str, Any]:
-        return self._properties
-
-    @property
-    def events(self) -> dict[str, Event]:
-        return self._events
-
-    def add_events(self, event_tms: dict[str, float], is_neural=False):
-        if (is_neural and self.neural is None) or (not is_neural and self.kin is None):
-            raise AssertionError("Cannot set event before its prospective data is initialized")
-        for name, tm in event_tms.items():
-            if name in self._events or name in self._properties:
-                raise AssertionError("Event or property already exists: " + name)
-            ix = self.neural.time2index(tm) if is_neural else self.kin.time2index(tm)
-            self._events[name] = Event(name=name, tm=tm, ix=ix, is_neural=is_neural)
-
-    def add_properties(self, properties: dict[str, Any]):
-        for name in properties:
-            if name in self._events or name in self._properties:
-                raise AssertionError("Event or property already exists: " + name)
-            self._properties[name] = properties[name]
-
-    def __getitem__(self, item):
-        if item in self._events:
-            return self._events[item].ix
-        elif item in self._properties:
-            return self._properties[item]
-        else:
-            raise AttributeError(f"Unknown event or property: " + item)
-        pass
-
-
-# ----------------------------------
-
-@dataclass
-class Data:
-
-    """ Highest level data container
-        Behaves as a Trial iterator, and provides access to dataset-level attributes
-    """
-
-    def __init__(self, trials: list[Trial], meta: DatasetMeta):
-        self._trials = trials
-        self._meta = meta
-        self._validate()
-
-    def __getstate__(self) -> dict:
-        return {'trials': self._trials, 'meta': self._meta}
-
-    def __setstate__(self, state):
-        self._trials = state['trials']
-        self._meta = state['meta']
-        self._validate()
-
     def _validate(self):
-        if not len(self._trials):
-            raise ValueError("Cannot initialize data with empty trial list")
-        # all trials should have the same lag and in size:
-        assert all([tr.lag == self[0].lag for tr in self])
-        assert all([tr.bin_sz == self[0].bin_sz for tr in self])
-        assert all([tr.base_data_params == self[0].base_data_params for tr in self])
-        # all trials should have the same events and properties:
-        assert all([tr.properties.keys() == self[0].properties.keys() for tr in self])
-        assert all([tr.events.keys() == self[0].events.keys() for tr in self])
-
-    def set_trials(self, trials: list[Trial]):
-        self._trials = trials
-        self._validate()
-
-    @property
-    def meta(self) -> DatasetMeta:
-        return self._meta
-
-    @property
-    def lag(self) -> float:
-        return self._trials[0].lag
-
-    @property
-    def bin_sz(self) -> float:
-        return self._trials[0].bin_sz
-
-    @property
-    def num_neurons(self) -> int:
-        return self._trials[0].neural.num_neurons
-
-    def __str__(self):
-        return f"{self.name}: {len(self)} trials, {self.num_neurons:d} neurons, " \
-               f"lag={self.lag:2.2f}s, bin={self.bin_sz:2.2f}s"
-
-    def __iter__(self):
-        yield from self._trials
-
-    def __next__(self):
-        return self.__iter__().__next__()
-
-    def __len__(self):
-        return len(self._trials)
-
-    def __getitem__(self, item):
-        if isinstance(item, np.ndarray):
-            if item.dtype == bool:
-                item = np.nonzero(item)[0]
-            assert item.dtype == int
-            return [self._trials[ix] for ix in item]
-        return self._trials[item]
-
-    def __getattr__(self, item):
-        return self._meta.__getattribute__(item)
+        def _assert_close(obj1, obj2):
+            assert np.isclose(obj1.bin_size, obj2.bin_size)
+            assert np.isclose(obj1.duration, obj2.duration)
+        _assert_close(self.kin, self.neural)
+        if self.neural_pc:
+            _assert_close(self.kin, self.neural_pc)
+        lags = self.kin.t - self.neural.t
+        assert np.max(np.abs(self._lag - lags)) < 1e-3 * self._lag
 
 
-# -------------
+class Trial(DataSlice):
+    """ Highest level data slice, direct child of dataset """
+    pass
 
-def postprocess_neural(trials: list[Trial], max_neural_pcs: int = 10,
-                       drop_static_neurons: bool = True, normalize_neural: bool = True) -> list[Trial]:
-    eps_ = 1e-6
 
-    # normalize spike counts per neuron:
-    spikecounts = np.concatenate([tr.neural[:] for tr in trials], axis=0)
-    assert spikecounts.shape[1] == trials[0].neural.num_neurons
-    mu = np.mean(spikecounts, axis=0)
-    sd = np.std(spikecounts, axis=0)
+class Segment(DataSlice):
+    """ A slice of trial (usually), or of a larger segment """
+    pass
 
-    if drop_static_neurons:
-        neurons_mask = sd > eps_
-        mu = mu[neurons_mask]
-        sd = sd[neurons_mask]
-        zero_variance_neurons = [col for i, col in enumerate(trials[0].neural.columns) if not neurons_mask[i]]
-        for tr in trials:
-            tr.neural._df.drop(columns=zero_variance_neurons, inplace=True)
 
-    if normalize_neural:
-        for tr in trials:
-            tr.neural._df -= mu
-            tr.neural._df /= sd
+def postprocess_data_slices(
+        data_slices: list[DataSlice],
+        variable: str = 'neural',
+        normalize: bool = True,
+        drop_zero_variance: bool = True,
+        new_bin_sz: float = None,
+        inplace: bool = False):
 
-        # validate:
-        spikecounts = np.concatenate([tr.neural[:] for tr in trials], axis=0)
-        assert np.abs(spikecounts.mean(axis=0)).max() < eps_
-        assert np.abs(np.std(spikecounts, axis=0) - 1.0).max() < eps_
+    orig_bin_size = data_slices[0].bin_size
 
-    # make neural PCs:
-    pca = PCA(n_components=max_neural_pcs)
+    slice_indexes = []
+    def _register_index(df: pd.DataFrame, idx: int):
+        slice_indexes.append([idx] * len(df))
+        return df
+
+    df = pd.concat((_register_index(s[variable].get_binned(bin_sz=new_bin_sz).df, idx)
+                    for idx, s in enumerate(data_slices)), axis=0)
+
+    slice_indexes = np.concatenate(slice_indexes)
+
+    if new_bin_sz is not None:
+        verbolize.inform(f"Time re-binned {orig_bin_size} -> {new_bin_sz} ="
+                         f" (x{int(.5 + new_bin_sz / orig_bin_size)} decimation)")
+
+    _eps = 1e-6
+    if drop_zero_variance:
+        is_zero_var_col = df.std() < _eps
+        df.drop(columns=df.columns[is_zero_var_col], inplace=True)
+        verbolize.inform(f"Dropped {strtools.part(is_zero_var_col, pr=1)} zero variance units")
+
+    if normalize:
+        df = (df - df.mean()) / (df.std() + _eps)
+
+    if inplace:
+        assert new_bin_sz is None, "Setting resampled inplace currently not supported"
+        for i, s in enumerate(data_slices):
+            s[variable]._df = df.iloc[slice_indexes == i, :]
+
+    return df, slice_indexes
+
+
+def set_neural_pcs_inplace(data_slices: list[DataSlice], num_pcs: int = 10):
+    pca = PCA(n_components=num_pcs)
+    spikecounts, _ = postprocess_data_slices(data_slices, 'neural', drop_zero_variance=False, inplace=False)
     pca.fit(spikecounts)
     meta = {'explained_variance_ratio': pca.explained_variance_ratio_,
             'explained_variance': pca.explained_variance_}
     pc_names = [f'pc{i + 1}' for i in range(pca.n_components)]
-    for tr in trials:
-        df = pd.DataFrame(data=pca.transform(tr.neural[:]), columns=pc_names)
-        tr.neural_pc = NeuralData(df=df, meta=meta, t=tr.neural.t.copy())
+    for s in data_slices:
+        df = pd.DataFrame(data=pca.transform(s.neural[:]), columns=pc_names)
+        s.neural_pc = NeuralData(df=df, meta=meta, t=s.neural.t.copy())
 
-    return trials
+
+def validate_data_slices(data_slices: list[DataSlice], same_len: bool = False,
+                         normalized_neural: bool = False):
+    """
+    Verifies that properties that should be the same for all slices within a group (e.g. bin size)
+    are indeed the same, and properties that should be unique (e.g. index) are indeed unique.
+    Args:
+        data_slices:
+        same_len: if True, checks that all slices have the same length
+        normalized_neural: if True, checks that neural data is normalized
+    """
+
+    def _unpack(attr: str | Callable):
+        if isinstance(attr, str):
+            return [getattr(s, attr) for s in data_slices]
+        else:
+            return [attr(s) for s in data_slices]
+
+    def _all_close(attr):
+        v = _unpack(attr)
+        return np.min(v) > .99 * np.max(v)
+
+    def _all_same(attr):
+        v = _unpack(attr)
+        return all([v[0] == vv for vv in v])
+
+    def _all_unique(attr):
+        v = _unpack(attr)
+        return len(set(v)) == len(v)
+
+    assert _all_unique('ix')
+    assert _all_close('lag')
+    assert _all_close('bin_size')
+    assert _all_same(type)
+    if same_len:
+        assert _all_same(len)
+
+    if isinstance(data_slices[0], Trial):
+        assert _all_same('parent')
+    elif isinstance(data_slices[0], Segment):
+        pass
+    else:
+        raise TypeError()
+
+    if normalized_neural:
+        tol = 1e-3
+        neurals = np.concatenate([s.neural[:] for s in data_slices], axis=0)
+        assert np.max(np.abs(np.mean(neurals, axis=0))) < tol
+        assert np.max(np.abs(1 - np.std(neurals, axis=0))) < tol
+
+
+def postprocess_trials_inplace(trials: list[Trial], dataset: str, process_neural: bool = True):
+    """
+    - sets trials' parent
+    - normalizes neural
+    - sets neural PCs
+    Args:
+        trials:
+        dataset: name of dataset, to set as trials' parent
+    """
+    for tr in trials:
+        tr.parent = dataset
+    if process_neural:
+        postprocess_data_slices(trials, variable='neural', inplace=True,
+                                drop_zero_variance=True, normalize=True)
+    set_neural_pcs_inplace(trials, num_pcs=10)
+    validate_data_slices(trials, normalized_neural=process_neural)
+

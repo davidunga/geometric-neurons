@@ -1,27 +1,30 @@
 import datetime
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from time import time
 from pathlib import Path
 import shutil
 from common.utils import dlutils
-from common.pairwise.sameness import SamenessData
 from common.pairwise.embedding_eval import EmbeddingEvalResult, EmbeddingEvaluator
 from common.utils.devtools import progbar
 from common.utils.typings import *
 from common.utils.devtools import verbolize
 from common.utils import tbtools
+from common.pairwise.sameness import TripletSampler, TripletLossWithIntermediates
 
 
 def triplet_train(
-        train_sameness: SamenessData,
-        val_sameness: SamenessData,
+        train_sampler: TripletSampler,
+        val_sampler: TripletSampler,
+        inputs: torch.Tensor | NDArray,
         model: torch.nn.Module = None,
         batch_size: int = 64,
         epochs: int = 100,
         batches_in_epoch: int = None,
+        n_eval_triplets: int = 2000,
         optim_params: dict | str = None,
         loss_margin: float = 1.,
         device: str = 'cpu',
@@ -46,16 +49,8 @@ def triplet_train(
     # ------
 
     def _add_to_tensborboard(eval_results: dict[str, EmbeddingEvalResult], epoch: int):
-
-        def _add_triplet_sampled_hist(name, sameness: SamenessData):
-            for col in sameness.triplet_sampled_counts.columns:
-                tag = f'{name} sampling counts - {col}'
-                counts_ = sameness.triplet_sampled_counts.loc[sameness.triplet_samplable_items, col].to_numpy()
-                tbtools.add_counts_as_histogram(tb, counts_, tag, epoch)
-
         if tb is None:
             return
-
         for metric in ('loss', 'auc', 'tscore'):
             tb.add_scalars(metric.capitalize(), {name: getattr(eval_res, metric)
                                                  for name, eval_res in eval_results.items()}, epoch)
@@ -73,16 +68,17 @@ def triplet_train(
         for tag in tags:
             snapshot_mgr.dump(tag, model, optimizer, meta)
 
-    def _init_sameness_and_evaluator(sameness: SamenessData) -> [EmbeddingEvaluator, EmbeddingEvalResult]:
-        sameness.to(device=device, dtype=torch.float32)
-        sameness.init_triplet_sampling()
-        print("   ", sameness.triplet_summary_string())
-        evaluator = sameness.make_evaluator(loss_margin=loss_margin)
-        null_result = evaluator.evaluate()
+    def _init_evaluator(sampler: TripletSampler) -> tuple[EmbeddingEvaluator, EmbeddingEvalResult]:
+        evaluator = EmbeddingEvaluator.from_triplets(
+            vecs=None,
+            triplets=sampler.sample_uniform(n=n_eval_triplets, rand_state=1),
+            loss_margin=loss_margin,
+            n=sampler.n_total_items)
+        print("   ", evaluator.summary_string())
+        null_result = evaluator.evaluate(inputs=inputs)
         print("   ", "Results without embedding:       ", str(null_result))
-        init_result = evaluator.evaluate(embedder=model)
+        init_result = evaluator.evaluate(embedder=model, inputs=inputs)
         print("   ", "Results with pre-train embedding:", str(init_result))
-        sameness.reset_triplet_sampled_counts()
         return evaluator, init_result
 
     # ------
@@ -128,21 +124,27 @@ def triplet_train(
             shutil.rmtree(tensorboard_dir.as_posix())
         tensorboard_dir.mkdir(parents=True, exist_ok=True)
 
+    inputs = torch.as_tensor(inputs, device=device, dtype=torch.float32)
     model.to(device=device, dtype=torch.float32)
     model.train()
-    triplet_loss = torch.nn.TripletMarginLoss(margin=loss_margin)
+
+    assert set(train_sampler.included_items).isdisjoint(val_sampler.included_items)
+    print("Confirmed Zero train/validation overlap")
 
     print("Device:", device)
-    print("Train triplets:")
-    train_evaluator, train_eval = _init_sameness_and_evaluator(train_sameness)
-
-    print("Val triplets:")
-    val_evaluator, val_eval = _init_sameness_and_evaluator(val_sameness)
+    print("Train data:")
+    print("   ", train_sampler.summary_string())
+    print("Train Eval:")
+    train_evaluator, train_eval = _init_evaluator(train_sampler)
+    print("Val Eval:")
+    val_evaluator, val_eval = _init_evaluator(val_sampler)
 
     if dbg_run:
         print(" !!! DEBUG RUN !!! ")
         epochs = start_epoch + 10
         batches_in_epoch = 4
+    if batches_in_epoch is None:
+        batches_in_epoch = train_sampler.n_anchors // batch_size
 
     if progress_mgr_params:
         progress_mgr = dlutils.ProgressManager(**progress_mgr_params, epochs=epochs)
@@ -151,28 +153,42 @@ def triplet_train(
 
     tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
 
-    batcher = dlutils.BatchManager(batch_size=batch_size, items=list(train_sameness.triplet_anchors),
-                                   batches_in_epoch=batches_in_epoch)
-
     if not warm_start:
         _add_to_tensborboard(dict(train=train_eval, val=val_eval), epoch=-1)
         snapshot_mgr.wipe()
         _save_snapshot('init', epoch_=-1)
 
+    triplet_loss = TripletLossWithIntermediates(margin=loss_margin)
+
+    epoch_history = pd.DataFrame(
+        data=np.zeros((batches_in_epoch * batch_size, 3), float),
+        columns=['losses', 'p_dists', 'n_dists']
+    )
+    epoch_history['is_hard'] = 0
+    dists = train_sampler.get_dist_matrix()
     for epoch in range(start_epoch, epochs):
         epoch_start_t = time()
-        batcher.init_epoch(epoch)
-        for batch in progbar(batcher.batches_in_epoch, span=20, prefix=f'[{epoch:3d}]', leave='prefix'):
+        epoch_history.loc[:, :] = 0
+        train_sampler.update_dist_mtx(dists)
+        for batch in progbar(batches_in_epoch, span=20, prefix=f'[{epoch:3d}]', leave='prefix'):
             optimizer.zero_grad()
-            anchors = batcher.get_items(batch)
-            A, P, N = train_sameness.sample_triplets(anchors, rand_seed=batch)
-            loss = triplet_loss(anchor=model(A), positive=model(P), negative=model(N))
+            A, P, N, is_hard = train_sampler.sample(n=batch_size, rand_state=batch).T
+            embedded_A = model(inputs[A])
+            embedded_P = model(inputs[P])
+            embedded_N = model(inputs[N])
+            loss, losses, p_dists, n_dists = triplet_loss(anchor=embedded_A, positive=embedded_P, negative=embedded_N)
             loss.backward()
             optimizer.step()
             model_file.touch()
 
-        train_eval = train_evaluator.evaluate(embedder=model)
-        val_eval = val_evaluator.evaluate(embedder=model)
+            dists[A, P] = p_dists
+            dists[A, N] = n_dists
+
+            indexes = range(batch * batch_size, (batch + 1) * batch_size)
+            epoch_history.loc[indexes, :] = np.c_[losses, p_dists, n_dists, is_hard]
+
+        train_eval = train_evaluator.evaluate(embedder=model, inputs=inputs)
+        val_eval = val_evaluator.evaluate(embedder=model, inputs=inputs)
 
         print(f' ({time() - epoch_start_t:2.1f}s) Train: {train_eval} Val: {val_eval}', end='')
         _add_to_tensborboard(dict(train=train_eval, val=val_eval), epoch=epoch)
@@ -186,6 +202,15 @@ def triplet_train(
         elif epoch % checkpoint_every == 0 or progress_mgr.should_stop:
             _save_snapshot('checkpoint', epoch_=epoch)
             print(' [Chckpt]', end='')
+
+        indexes = epoch_history['is_hard'] == 0
+        avg_diff0 = epoch_history.loc[indexes, 'n_dists'].mean() - epoch_history.loc[indexes, 'p_dists'].mean()
+        avg_loss0 = epoch_history.loc[indexes, 'losses'].mean()
+        indexes = epoch_history['is_hard'] == 1
+        avg_diff1 = epoch_history.loc[indexes, 'n_dists'].mean() - epoch_history.loc[indexes, 'p_dists'].mean()
+        avg_loss1 = epoch_history.loc[indexes, 'losses'].mean()
+
+        print(f' Hard/Not: AvgDiff={avg_diff0:2.2f}/{avg_diff1:2.2f}, AvgLoss={avg_loss0:2.2f}/{avg_loss1:2.2f}', end='')
 
         print('')
 

@@ -37,6 +37,11 @@ class KinData(NpDataFrame):
     def num_vars(self):
         return self.shape[1]
 
+    def __str__(self):
+        return f"KinData: {self.num_vars} variables, {len(self)} bins"
+
+    def __repr__(self):
+        return str(self)
 
 #
 # class KinData2(UniformlySampled):
@@ -120,6 +125,7 @@ def kinematics(X: NpPoints, t: NpVec, dst_t: NpVec, dx: float = None, smooth_dur
     deviation_from_uniform = np.max(np.abs(dst_t - (t0 + np.arange(len(dst_t)) / fs)))
     max_deviation = .01  # in dt units
     assert deviation_from_uniform * fs < max_deviation
+    assert dst_t[-1] <= t[-1]
 
     # ----
 

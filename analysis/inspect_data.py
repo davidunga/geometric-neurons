@@ -121,6 +121,10 @@ def compare_rigid_to_speed_dist(cfg: Config = None):
 
     sameness, pairs_data, segments = DataMgr(cfg.data).load_sameness()
     sameness.init_triplet_sampling()
+
+    from common.pairwise.sameness import TripletSampler
+    TripletSampler(pairs_data.data, n_samples=1000)
+
     print(sameness.triplet_summary_string())
 
     if pairs_by == "triplets":
