@@ -25,6 +25,7 @@ def triplet_train(
         epochs: int = 100,
         batches_in_epoch: int = None,
         n_eval_triplets: int = 2000,
+        noise_sigma: float = 0,
         optim_params: dict | str = None,
         loss_margin: float = 1.,
         device: str = 'cpu',
@@ -48,9 +49,13 @@ def triplet_train(
 
     # ------
 
-    def _add_to_tensborboard(eval_results: dict[str, EmbeddingEvalResult], epoch: int):
+    def _add_to_tensborboard(eval_results: dict[str, EmbeddingEvalResult], epoch: int,
+                             hists: dict[str, Sequence[int]] = None):
         if tb is None:
             return
+        if hists:
+            for tag, counts in hists.items():
+                tbtools.add_counts_as_histogram(tb, counts, tag, epoch)
         for metric in ('loss', 'auc', 'tscore'):
             tb.add_scalars(metric.capitalize(), {name: getattr(eval_res, metric)
                                                  for name, eval_res in eval_results.items()}, epoch)
@@ -61,7 +66,10 @@ def triplet_train(
                     'best' = save under 'best' & 'checkpoint'
                     'checkpoint' = save only under 'checkpoint'
         """
-        meta = {'epoch': epoch_, 'train_status': progress_mgr.status_dict, 'val': val_eval.metrics_dict}
+        meta = {'epoch': epoch_,
+                'train_status': progress_mgr.status_dict,
+                'val': val_eval.metrics_dict,
+                'train': train_eval.metrics_dict}
         tag_hierarchy = ['init', 'best', 'checkpoint']
         hierarchy_level = tag_hierarchy.index(kind)
         tags = tag_hierarchy[hierarchy_level:]
@@ -128,6 +136,9 @@ def triplet_train(
     model.to(device=device, dtype=torch.float32)
     model.train()
 
+    torch_rng = torch.Generator(device=device)
+    noise_scale = noise_sigma * torch.std(inputs, axis=0)
+
     assert set(train_sampler.included_items).isdisjoint(val_sampler.included_items)
     print("Confirmed Zero train/validation overlap")
 
@@ -154,7 +165,9 @@ def triplet_train(
     tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
 
     if not warm_start:
-        _add_to_tensborboard(dict(train=train_eval, val=val_eval), epoch=-1)
+        _add_to_tensborboard(dict(train=train_eval, val=val_eval),
+                             epoch=-1,
+                             hists={'sample_counts': np.zeros(train_sampler.n_total_items, int)})
         snapshot_mgr.wipe()
         _save_snapshot('init', epoch_=-1)
 
@@ -166,16 +179,32 @@ def triplet_train(
     )
     epoch_history['is_hard'] = 0
     dists = train_sampler.get_dist_matrix()
+
     for epoch in range(start_epoch, epochs):
+        sample_counts = np.zeros(train_sampler.n_total_items, int)
         epoch_start_t = time()
         epoch_history.loc[:, :] = 0
         train_sampler.update_dist_mtx(dists)
         for batch in progbar(batches_in_epoch, span=20, prefix=f'[{epoch:3d}]', leave='prefix'):
+            torch_rng.manual_seed(batch)
+
+            if noise_sigma:
+                white_noise = torch.randn(inputs.shape, generator=torch_rng, device=device, dtype=inputs.dtype)
+                noisey_inputs = inputs + noise_scale * white_noise
+            else:
+                noisey_inputs = inputs
+
             optimizer.zero_grad()
             A, P, N, is_hard = train_sampler.sample(n=batch_size, rand_state=batch).T
-            embedded_A = model(inputs[A])
-            embedded_P = model(inputs[P])
-            embedded_N = model(inputs[N])
+
+            sample_counts[A] += 1
+            sample_counts[P] += 1
+            sample_counts[N] += 1
+            noisy_inputs = torch.randn(inputs.shape, generator=torch_rng, device=device, dtype=inputs.dtype)
+
+            embedded_A = model(noisey_inputs[A])
+            embedded_P = model(noisey_inputs[P])
+            embedded_N = model(noisey_inputs[N])
             loss, losses, p_dists, n_dists = triplet_loss(anchor=embedded_A, positive=embedded_P, negative=embedded_N)
             loss.backward()
             optimizer.step()
@@ -187,11 +216,13 @@ def triplet_train(
             indexes = range(batch * batch_size, (batch + 1) * batch_size)
             epoch_history.loc[indexes, :] = np.c_[losses, p_dists, n_dists, is_hard]
 
+        assert sample_counts[train_sampler.included_items].sum() == sample_counts.sum()
+
         train_eval = train_evaluator.evaluate(embedder=model, inputs=inputs)
         val_eval = val_evaluator.evaluate(embedder=model, inputs=inputs)
 
         print(f' ({time() - epoch_start_t:2.1f}s) Train: {train_eval} Val: {val_eval}', end='')
-        _add_to_tensborboard(dict(train=train_eval, val=val_eval), epoch=epoch)
+        _add_to_tensborboard(dict(train=train_eval, val=val_eval), epoch=epoch, hists={'sample_counts': sample_counts})
 
         progress_mgr.process(val_eval.loss, train_eval.loss, val_eval.auc, epoch=epoch)
         print(' ' + progress_mgr.report(), end='')

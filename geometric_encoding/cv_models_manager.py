@@ -11,6 +11,25 @@ from common.utils import dictools
 import shutil
 
 
+def abbreviate(s: str):
+
+    lookup = {'val': 'vl', 'train': 'tr', 'init': '0',
+              'mean': '', '_vs_': '/', '_': '.'}
+
+    abbrv = s
+    for a, b in lookup.items():
+        abbrv = abbrv.replace(a, b)
+
+    if abbrv.startswith('.') and not s.startswith('_'):
+        abbrv = abbrv[1:]
+    if abbrv.endswith('.') and not s.endswith('_'):
+        abbrv = abbrv[:-1]
+
+    return abbrv
+
+
+
+
 class CvModelsManager:
 
     RESULTS_FILE = paths.CV_DIR / "results.txt"
@@ -87,7 +106,7 @@ class CvModelsManager:
         print(f"Modified config in {len(model_files)} files. Backup path: {str(backup_dir)}")
 
     @staticmethod
-    def get_config_and_files_by_rank(rank: int, rank_by: str = 'mean_auc') -> tuple[Config, list[Path]]:
+    def get_config_and_files_by_rank(rank: int, rank_by: str = 'mean_auc_val') -> tuple[Config, list[Path]]:
         df, agg_df = CvModelsManager.make_results_dfs(sort_agg_by=rank_by)
         base_name = agg_df.iloc[rank]['base_name']
         df_rows = df[df['base_name'] == base_name]
@@ -100,7 +119,7 @@ class CvModelsManager:
         return cfg, files
 
     @staticmethod
-    def make_results_dfs(sort_agg_by: str = 'mean_auc') -> tuple[pd.DataFrame, pd.DataFrame]:
+    def make_results_dfs(sort_agg_by: str = 'mean_auc_val') -> tuple[pd.DataFrame, pd.DataFrame]:
 
         METRIC_NAMES = ['auc', 'loss', 'tscore']
 
@@ -124,10 +143,12 @@ class CvModelsManager:
             for k in METRIC_NAMES:
                 best_val = best_meta['val'][k]
                 init_val = init_meta['val'][k]
-                metrics_dict[k] = best_val
-                metrics_dict['init_' + k] = init_val
-                if k in ['auc']:
-                    metrics_dict['rel_' + k] = 100 * (best_val - init_val) / init_val
+                best_train = best_meta['train'][k]
+                metrics_dict[f'{k}_val'] = best_val
+                metrics_dict[f'{k}_val_init'] = init_val
+                metrics_dict[f'{k}_train'] = best_train
+                if k in ['auc', 'loss']:
+                    metrics_dict[f'{k}_val_vs_train'] = best_val / best_train
 
             items.append({"recency_rank": 0,
                           "time": file_info.modified.strftime("%Y-%m-%d %H:%M"),
@@ -154,7 +175,8 @@ class CvModelsManager:
 
         agg_items = []
         grid_cols = list(grid_df.columns)
-        metric_cols = [col for col in df.columns if col.endswith(tuple(METRIC_NAMES))]
+        metric_cols = [col for col in df.columns
+                       if col.startswith(tuple(METRIC_NAMES)) and 'train' in col or 'val' in col]
         for base_name in df['base_name'].unique():
 
             rows = df.loc[df['base_name'] == base_name]
@@ -175,25 +197,27 @@ class CvModelsManager:
             mean_train_epochs = int(round(rows['train_epochs'].mean()))
 
             agg_items.append({
-                "recency_rank": 0,
-                "latest_time": latest_time,
+                "recency": 0,
+                "time": latest_time,
                 **mean_metrics,
                 **rows.iloc[0][grid_cols].to_dict(),
                 "base_name": base_name,
-                "fold_count": fold_count,
-                "mean_train_epochs": mean_train_epochs,
+                "folds": fold_count,
+                "epochs": mean_train_epochs,
             })
 
         agg_df = pd.DataFrame.from_records(agg_items)
-        agg_df['recency_rank'] = len(agg_df) - np.argsort(agg_df['latest_time'].to_numpy(str)).argsort() - 1
+        agg_df['recency'] = agg_df['time'].rank(method='dense', ascending=False).astype(int)
 
         agg_df = agg_df.sort_values(by=sort_agg_by, ascending=False, ignore_index=True)
 
         return df, agg_df
 
     @staticmethod
-    def refresh_results_file(sort_agg_by: str = 'mean_auc'):
+    def refresh_results_file(sort_agg_by: str = 'mean_auc_val'):
         df, agg_df = CvModelsManager.make_results_dfs(sort_agg_by=sort_agg_by)
+        agg_df.rename(columns={col: abbreviate(col) for col in agg_df}, inplace=True)
+        CvModelsManager.RESULTS_FILE.parent.mkdir(exist_ok=True, parents=True)
         with CvModelsManager.RESULTS_FILE.open("w") as f:
             f.write("Refresh time: " + str(pd.Timestamp.now()))
             f.write("\nSummary:\n")

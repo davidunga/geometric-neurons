@@ -1,30 +1,29 @@
 data:
     trials:
       name: TP_RS
-      bin_sz: .05
+      bin_sz: .01
       lag: .1
     segments:
       dur: .2
       radcurv_bounds: [[.2, 5]]
     pairing:
-      variable: kin.EuSpd
-      align_kind: [none]
-      dist_metric: [absavg]
+      variable: kin.X
+      align_kind: [affine]
+      dist_metric: [nmahal]
       same_pctl: .05
       notSame_pctl: .2
       exclude_pctl: .8
-      max_pairs: 100000
       balance: [True]
       shuffle: False
     inputs:
       variable: neural
-      bin_sz: [.02]
+      bin_sz: [.05]
       drop_zero_variance: True
-      normalize: True
+      normalize: [True, False]
 
 model:
-  dim: [3, 7]
-  dropout: [0.5]
+  dim: [3]
+  dropout: [.75]
 
 training:
   cv:
@@ -34,12 +33,13 @@ training:
     patience: null
     overfit: 100
     converge: 1.e-4
-  p_hard: .5
+  noise_sigma: [.2, .5]
+  p_hard: [.5]
   epochs: 100
   batch_size: [64]
   batches_in_epoch: 4000
   n_eval_triplets: 5000
-  loss_margin: [1.0]
+  loss_margin: [1., 5.]
   optim_params:
     kind: [SGD]
-    lr: [5.e-04, 1.e-03, 1.e-04]
+    lr: [1.e-05, 1.e-04, 1.e-03]

@@ -135,8 +135,8 @@ def make_hatso_data(data_dir: Path, dataset: str, lag: float, bin_sz: float) -> 
     trials = construct_hatso_trials(file=str(data_dir / specs["file"]), brain_sites=specs["brain_sites"],
                                     lag=lag, bin_sz=bin_sz, kin_fnc=kinematics,
                                     trials_blacklist=specs["trials_blacklist"])
-    postprocess_trials_inplace(trials, dataset, process_neural=False)
-    #validate_data_slices(trials, normalized_neural=True)
+    postprocess_trials_inplace(trials, dataset, process_neural=True)
+    validate_data_slices(trials, normalized_neural=True)
     meta = get_metadata(dataset)
     return trials, meta
 

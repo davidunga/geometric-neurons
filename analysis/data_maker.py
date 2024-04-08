@@ -305,12 +305,13 @@ def calc_pairing(segments: list[Segment],
 
 
 def run__make_and_save():
-    force = 3
-    # datasets = ['TP_RS']
-    datasets = get_hatso_datasets(task='CO')
-    upto = DataConfig.TRIALS
+    force = 0
+    datasets = ['TP_RS', 'TP_RJ']
+    datasets = datasets[:1]
+    #datasets = get_hatso_datasets(task='TP')
+    upto = None # DataConfig.TRIALS
     bin_sizes = [None]
-    for align_kind in ['affine']:
+    for align_kind in ['affine', 'ortho']:
         for bin_sz in bin_sizes:
             for dataset in datasets:
                 data_cfg = Config.from_default().data

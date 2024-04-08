@@ -4,9 +4,16 @@ Handles processing and storing neural information
 from motorneural.npdataframe import NpDataFrame
 from collections import Counter
 import pandas as pd
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
 from motorneural.typetools import *
 import numpy as np
+
+
+def make_bin_edges(low: float, high: float, bin_size: int) -> NpVec[float]:
+    start = int(low / bin_size) * bin_size
+    stop = int(1 + high / bin_size) * bin_size
+    bin_edges = np.arange(start, stop, bin_size)
+    return bin_edges
 
 
 class PopulationSpikeTimes:
@@ -101,36 +108,33 @@ class PopulationSpikeTimes:
         assert all(total_spikes_per_neuron[ix] == visit_count[ix] for ix in range(len(self.names)))
         return result
 
-    def get_spike_counts(self, bin_edges) -> dict[str, NpVec[float]]:
+    def get_spike_rates(self, bin_size: float, stat: str = 'rate', smooth_dur: float = 0) -> [pd.DataFrame, NpVec]:
         """
-        Get dict of spike counts per neuron
-        For uniform bins, get_raster() might be a better option
-        """
-        return {neuron_name: np.histogram(neuron_tms, bins=bin_edges)[0]
-                for neuron_name, neuron_tms in self.spike_times().items()}
-
-    def get_raster(self, bin_size: float, smooth_dur: float = 0, normalize: bool = False) -> [pd.DataFrame, NpVec]:
-        """
-        Get spikes raster dataframe
+        Get spike rates dataframe
         Args:
             bin_size: bin duration
-            smooth_dur: temporal sigma size of gaussian smoothing
-            normalize: z-score normalize each neuron?
+            stat: 'rate' (default), or 'count'
+            smooth_dur: smooth duration
         Returns:
-            df: dataframe with columns = neuron names, rows = spike counts
+            df: dataframe with columns = neuron names, rows = spike rates
             bin_edges: time of row df.iloc[i] is between [bin_edges[i], bin_edges[i+1]]
         """
+        assert stat in ('count', 'rate')
+        sigma = smooth_dur / bin_size
+
+        def _calc_rates(tms: NpVec) -> NpVec[float]:
+            rates = np.histogram(tms, bins=bin_edges)[0].astype(float)
+            if stat == 'rate':
+                rates /= bin_size
+            if sigma:
+                rates = gaussian_filter1d(rates, sigma=sigma, axis=0, mode='mirror')
+            return rates
+
         t0 = int(self.tlims[0] / bin_size) * bin_size
         tf = int(1 + self.tlims[1] / bin_size) * bin_size
         bin_edges = np.arange(t0, tf, bin_size)
-        spike_counts = self.get_spike_counts(bin_edges=bin_edges)
-        if smooth_dur:
-            sigma = smooth_dur / bin_size
-            spike_counts = {name: gaussian_filter1d(counts, sigma=sigma, axis=0, mode='mirror') for
-                            name, counts in spike_counts.items()}
-        df = pd.DataFrame.from_dict(spike_counts)
-        if normalize:
-            df = (df - df.mean()) / df.std()
+        df = pd.DataFrame.from_dict({neuron: _calc_rates(tms)
+                                     for neuron, tms in self.spike_times().items()})
         return df, bin_edges
 
     def __str__(self):
@@ -149,9 +153,9 @@ class NeuralData(NpDataFrame):
     @classmethod
     def from_spike_times(
             cls, bin_size: float, spktimes: PopulationSpikeTimes,
-            neuron_info: dict[str, dict] = None, smooth_dur: float = 0):
-        raster_df, bin_edges = spktimes.get_raster(bin_size=bin_size, smooth_dur=smooth_dur)
-        return cls(raster_df, meta=neuron_info, t=bin_edges[:-1])
+            neuron_info: dict[str, dict] = None, smooth_dur: float = .0):
+        rates_df, bin_edges = spktimes.get_spike_rates(bin_size=bin_size, stat='rate', smooth_dur=smooth_dur)
+        return cls(rates_df, meta=neuron_info, t=bin_edges[:-1])
 
     @property
     def neuron_info(self) -> dict:
@@ -214,6 +218,25 @@ def _test():
 
 
 
-if __name__ == "__main__":
-    _test()
-
+# if __name__ == "__main__":
+    # samples_per_sec = 1000
+    # trial_duration = 1 * 60
+    # t = np.linspace(0, trial_duration, trial_duration * samples_per_sec)
+    # gt_spike_rate = np.sin(t * 4 / (2 * np.pi))
+    #
+    # spiking_proba = average_spikes_per_sec / samples_per_sec
+    #
+    # prob = 15 / 1000  # We are sampling 1000 times/s and the neuron fires 15x/s on average
+    #
+    # # Initiate data structure to hold the spike train
+    #
+    # t =
+    # poisson_neuron = np.zeros(2 * 60 * 1000)  # 2 minutes * 60s/minute * 1000 samples/second
+    #
+    # # Create a loop to simulate each time point
+    # for i in range(len(poissonNeuron)):
+    #     # conditional statement to asssess if spike has occurred
+    #     if np.random.rand() < prob:  # if a random number between 0 and 1 is < prob
+    #         # store a 1 in poissonNeuron. This means the neuron has fired
+    #         poissonNeuron[i] = 1
+    #

@@ -102,6 +102,9 @@ class TrainingMgr:
         model_file = self.model_file
         tensorboard_dir = self.tensorboard_dir
 
+        model_file.parent.mkdir(exist_ok=True, parents=True)
+        tensorboard_dir.parent.mkdir(exist_ok=True, parents=True)
+
         if model_file.is_file():
 
             skip = False
@@ -200,9 +203,5 @@ def SCRIPT_cv_train_by_modifying_cfg():
 
 
 if __name__ == "__main__":
-    #SCRIPT_cv_train_by_modifying_cfg()
-    #CvModelsManager.get_config_and_files_by_rank(2)
-    cv_train(exists_handling="overwrite", dbg_run=False, early_stop_epoch=20)
-    #CvModelsManager.refresh_results_file()
-    #cv_train(exists_handling="overwrite", dbg_run=False, cfg_name_include="f2688c")
-    #cv_train(exists_handling="overwrite", dbg_run=False, cfg_name_exclude="f2688c")
+    CvModelsManager.refresh_results_file()
+    cv_train(exists_handling="skip", dbg_run=False, early_stop_epoch=20)

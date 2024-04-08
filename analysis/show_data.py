@@ -25,11 +25,11 @@ def adjust_legend(ax=None, orient: str = 'auto', loc: str = 'best'):
 if __name__ == "__main__":
 
     cfg = Config.from_default()
-    cfg.data.trials.name = 'CO_RS_01'
+    cfg.data.trials.name = 'TP_RS'
     data_mgr = DataMgr(cfg.data)
     trials, meta = data_mgr.load_trials()
     print(meta)
 
-    for trial_ix in np.round(np.linspace(0, len(trials) - 1, 5)).astype(int):
-        draw_data.draw_neural_raster(trials[trial_ix])
+    for trial_ix in np.round(np.linspace(0, len(trials) - 1, 10)).astype(int):
+        draw_data.draw_neural_rates(trials[trial_ix].get_binned(factor=1.5))
     plt.show()
