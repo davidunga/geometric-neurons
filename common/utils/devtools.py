@@ -1,11 +1,13 @@
-import os.path
-from time import time
-import numpy as np
-import inspect
-from dataclasses import dataclass
-from collections import defaultdict
-from common.utils.typings import *
 import functools
+import inspect
+import os.path
+from collections import defaultdict
+from dataclasses import dataclass
+from time import time
+
+import numpy as np
+
+from common.utils.typings import *
 
 
 class progbar:

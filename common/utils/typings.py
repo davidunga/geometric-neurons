@@ -1,8 +1,7 @@
-from numpy.typing import NDArray, ArrayLike
-from numpy.random import Generator
 from pathlib import Path
-from typing import (Any, Sequence, Generator, Iterator, Optional, Container,
-                    Iterable, Collection, Sized, Callable, Literal, Hashable)
+from typing import (Generator, Callable, Sequence, Any, Iterable, Iterator, Literal)
+
+from numpy.typing import NDArray
 
 NpVec = NDArray
 NpMatrix = NDArray

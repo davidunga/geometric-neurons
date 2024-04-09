@@ -1,5 +1,5 @@
-import torch
 from abc import ABC, abstractmethod
+import torch
 
 
 class Embedder(ABC, torch.nn.Module):

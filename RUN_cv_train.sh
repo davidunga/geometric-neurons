@@ -1,7 +1,7 @@
 #!/bin/zsh
 conda_env=geometric-neurons
 project_root=~/geometric-neurons
-py_file=geometric_encoding/cv_trian_embedding.py
+py_file=analysis/cv_train.py
 
 source ~/miniconda3/bin/activate
 conda activate $conda_env

@@ -42,6 +42,5 @@ def normalize(X, axis, kind: str = 'std', inplace: bool = False):
 
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt
     x = np.random.default_rng(1).random(size=(20, 30))
     reduce_rows(x, 3)

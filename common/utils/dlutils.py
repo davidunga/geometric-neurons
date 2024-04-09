@@ -1,13 +1,23 @@
 """ Deep-learning utilities """
 import os
-import json
+from copy import deepcopy
+import numpy as np
 import pandas as pd
 import torch
-from copy import deepcopy
-from common.utils.typings import *
-from dataclasses import dataclass, asdict
+from common.metric_learning import embedding_models
 from common.utils import ostools
-import numpy as np
+from common.utils.typings import *
+from common.utils.robust_pickle import get_robust_pickle_module
+
+pickle = get_robust_pickle_module([embedding_models])
+
+
+def safe_predict(model: torch.nn.Module, x: NDArray | torch.Tensor) -> NDArray:
+    is_training = model.training
+    model.train(False)
+    x = model(torch.as_tensor(x, dtype=torch.float32)).detach().cpu.numpy()
+    model.train(is_training)
+    return x
 
 
 def get_optimizer(model_params, kind: str = 'Adam', **optim_kws):
@@ -99,7 +109,7 @@ class SnapshotMgr:
 
     def _fetch_all_snapshots(self) -> dict:
         if self.file.is_file() and self.file.stat().st_size:
-            return torch.load(str(self.file))
+            return torch.load(str(self.file), pickle_module=pickle)
         else:
             return {}
 

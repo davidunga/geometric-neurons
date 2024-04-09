@@ -1,6 +1,5 @@
 import numpy as np
-import common.utils.linalg as linalg
-from common.utils.typings import *
+from typing import Callable
 
 
 def normalized_mahalanobis(X, Y) -> float:

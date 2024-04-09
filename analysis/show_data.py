@@ -1,9 +1,9 @@
+import matplotlib.pyplot as plt
 import numpy as np
 
-from motorneural import draw_data
-from data_manager import DataMgr
 from config import Config
-import matplotlib.pyplot as plt
+from data_manager import DataMgr
+from common.motorneural import draw_data
 
 
 def adjust_legend(ax=None, orient: str = 'auto', loc: str = 'best'):

@@ -1,14 +1,13 @@
-import tbparse
-from scipy.ndimage import gaussian_filter1d
-import seaborn as sns
 import matplotlib.pyplot as plt
-import matplotlib.pylab as pylab
-from itertools import product
 import numpy as np
 import pandas as pd
-from common.utils.typings import *
-from common.utils import plotting
+import seaborn as sns
+import tbparse
+from scipy.ndimage import gaussian_filter1d
 from torch.utils.tensorboard import SummaryWriter
+
+from common.utils import plotting
+from common.utils.typings import *
 
 
 def load_tensorboard_as_df(tbdir: PathLike, smooth_sigma: float = 2) -> pd.DataFrame:
@@ -112,8 +111,7 @@ def plot_tensorboard(tbdir: PathLike, stat_win_size: int = 10, title_suffix: str
 
 if __name__ == "__main__":
     from common.utils import ostools
-    from common.utils.dlutils import checkpoint
-    from paths import MODELS_DIR
+
     tbdirs = ostools.ls("/Users/davidu/tensorboard/geometric-neurons/TP_RS*")
     for tbdir in tbdirs[::-1]:
         plot_tensorboard(tbdir)

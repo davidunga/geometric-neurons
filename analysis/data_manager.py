@@ -1,19 +1,18 @@
-import pandas as pd
-from motorneural.data import Segment, postprocess_data_slices, Trial, validate_data_slices
 import numpy as np
-import paths
-from common import symmetric_pairs
+import pandas as pd
 import common.utils.picklestore as pickle
+import paths
 from analysis.config import DataConfig, Config
+from common.utils import symmetric_pairs
 from common.utils.devtools import verbolize
 from common.utils.typings import *
-from common.utils import strtools
+from motorneural.data import Segment, postprocess_data_slices, Trial, validate_data_slices
 
 
 class DataMgr:
 
-    def __init__(self, data_cfg: DataConfig):
-        self.cfg: DataConfig = data_cfg
+    def __init__(self, cfg: DataConfig):
+        self.cfg: DataConfig = cfg
 
     def pkl_path(self, level: DataConfig.Level) -> Path:
         return paths.DATA_DIR / (self.cfg.str(level) + f'.{level}.pkl')

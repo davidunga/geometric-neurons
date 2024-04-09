@@ -1,9 +1,8 @@
-from screeninfo import get_monitors, Monitor
-import matplotlib.pyplot as plt
+from itertools import product
+
 import matplotlib
 from matplotlib import pylab
-from itertools import product
-from dataclasses import dataclass
+from screeninfo import get_monitors, Monitor
 
 
 class MplParams:

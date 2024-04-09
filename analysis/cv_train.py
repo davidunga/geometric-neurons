@@ -1,28 +1,19 @@
-import json
-from itertools import product
-from datetime import datetime
 import numpy as np
 import pandas as pd
 import torch.nn
-from common import symmetric_pairs
-from analysis.config import Config
-from geometric_encoding.embedding import LinearEmbedder
-from analysis.data_manager import DataMgr
-from common.pairwise.triplet_train import triplet_train
-#from common.pairwise.sameness import SamenessData
+from analysis.pairs_dataframe import pairs_to_matrix
 import paths
-from glob import glob
-from common.utils.typings import *
-from common.utils.dlutils import checkpoint
-from common.utils import dlutils
-from common.utils import ostools
+from analysis.config import Config
+from analysis.data_manager import DataMgr
+from common.metric_learning.triplet_sampler import TripletSampler
+from common.metric_learning.triplet_train import triplet_train
 from common.utils import dictools
-import os
-from time import time
-from cv_models_manager import CvModelsManager
-from analysis.config import DataConfig, Config, TrainingConfig
+from common.utils import dlutils
 from common.utils.devtools import verbolize
-from common.pairwise.sameness import TripletSampler
+from common.utils.typings import *
+import cv_results_mgr
+from common.metric_learning.embedding_models import LinearEmbedder
+from typing import Literal
 
 
 class TrainingMgr:
@@ -88,7 +79,7 @@ class TrainingMgr:
 
     @property
     def model_file(self) -> Path:
-        model_file = CvModelsManager.make_model_file_path(cfg=self.cfg, fold=self.fold)
+        model_file = cv_results_mgr.make_model_file_path(cfg=self.cfg, fold=self.fold)
         if self.dbg_run:
             model_file = model_file.with_stem(model_file.stem + '.DBG')
         return model_file
@@ -98,6 +89,11 @@ class TrainingMgr:
         return paths.TENSORBOARD_DIR / self.model_file.stem
 
     def dispatch(self) -> bool:
+
+        def _make_sampler(pairs_df: pd.DataFrame, **kwargs) -> TripletSampler:
+            sameness_mtx = pairs_to_matrix(pairs_df, 'isSame', map_zero_value=-1, dtype=int)
+            dist_mtx = pairs_to_matrix(pairs_df, 'dist')
+            return TripletSampler(sameness_mtx=sameness_mtx, dist_mtx=dist_mtx, **kwargs)
 
         model_file = self.model_file
         tensorboard_dir = self.tensorboard_dir
@@ -127,8 +123,8 @@ class TrainingMgr:
         model_file.touch()  # mark model as exists as soon as we decide to work on it
 
         train_pairs, val_pairs = self.load_split_pairs()
-        train_sampler = TripletSampler.from_pairs_df(train_pairs, p_hard=self.cfg.training.p_hard)
-        val_sampler = TripletSampler.from_pairs_df(val_pairs)
+        train_sampler = _make_sampler(train_pairs, p_hard=self.cfg.training.p_hard)
+        val_sampler = _make_sampler(val_pairs)
 
         inputs, _ = self.data_mgr.get_inputs()
         model = self.init_model(input_size=inputs.shape[1])
@@ -147,11 +143,11 @@ class TrainingMgr:
         return True
 
 
-def cv_train(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
-             dbg_run: bool = False,
-             early_stop_epoch: int = None,
-             cfg_name_include: str = None,
-             cfg_name_exclude: str = None):
+def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
+           dbg_run: bool = False,
+           early_stop_epoch: int = None,
+           cfg_name_include: str = None,
+           cfg_name_exclude: str = None):
 
     cfgs = [cfg for cfg in Config.yield_from_grid()]
     max_folds = max([cfg.training.cv.folds for cfg in cfgs])
@@ -159,7 +155,7 @@ def cv_train(exists_handling: Literal["warm_start", "overwrite", "skip", "error"
     grid_cfgs_df = pd.DataFrame.from_records(dictools.variance_dicts([cfg.__dict__ for cfg in cfgs],
                                                                      force_keep=['data.pairing.balance']))
 
-    #CvModelsManager.refresh_results_file()
+    #cv_results_mgr.refresh_results_file()
     for fold in range(max_folds):
         for cfg_ix, cfg in enumerate(cfgs):
 
@@ -177,31 +173,9 @@ def cv_train(exists_handling: Literal["warm_start", "overwrite", "skip", "error"
                                        exists_handling=exists_handling)
             success = training_mgr.dispatch()
             if success:
-                CvModelsManager.refresh_results_file()
-
-
-def SCRIPT_cv_train_by_modifying_cfg():
-    cfg_or_rank = 0
-    dbg_run = False
-    fold = 0
-    early_stop_epoch = 20
-    exists_handling = "overwrite"
-
-    if isinstance(cfg_or_rank, int):
-        cfg, _ = CvModelsManager.get_config_and_files_by_rank(cfg_or_rank)
-    else:
-        assert isinstance(cfg_or_rank, Config)
-        cfg = Config
-
-    print("Modifying config", cfg.output_name)
-
-    # cfg.data.pairing.metric = 'rigid'
-    # training_mgr = TrainingMgr(cfg, fold=fold, dbg_run=dbg_run, early_stop_epoch=early_stop_epoch,
-    #                            exists_handling=exists_handling)
-    # success = training_mgr.dispatch()
-    # CvModelsManager.refresh_results_file()
+                cv_results_mgr.refresh_results_file()
 
 
 if __name__ == "__main__":
-    CvModelsManager.refresh_results_file()
-    cv_train(exists_handling="skip", dbg_run=False, early_stop_epoch=20)
+    cv_results_mgr.refresh_results_file()
+    #run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=20)

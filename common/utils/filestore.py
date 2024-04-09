@@ -1,8 +1,8 @@
+import os
 from collections.abc import MutableMapping
 from pathlib import Path
-import os
-from file_io import FileIO, PickleIO, PandasCsvIO, DynamicFileIO
 
+from file_io import FileIO, PickleIO, PandasCsvIO, DynamicFileIO
 
 
 class FileStore(MutableMapping):

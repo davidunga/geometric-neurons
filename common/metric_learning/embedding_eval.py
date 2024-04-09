@@ -1,10 +1,10 @@
+from dataclasses import dataclass
 import numpy as np
 import torch.nn
-from common.utils.typings import *
-from sklearn import metrics
 from scipy import stats
-from dataclasses import dataclass
+from sklearn import metrics
 from common.utils import strtools
+from common.utils.typings import *
 
 
 @dataclass
@@ -113,7 +113,8 @@ class EmbeddingEvaluator:
         paired_items, is_same = merge_pos_neg(triplets[:, [0, 1]], triplets[:, [0, 2]])
         return cls(vecs=vecs, paired_items=paired_items, is_same=is_same, **kwargs)
 
-    def evaluate(self, embedder: torch.nn.Module | Callable = None, inputs: torch.Tensor = None) -> EmbeddingEvalResult:
+    def get_embedded_vecs(self, embedder: torch.nn.Module | Callable = None,
+                          inputs: torch.Tensor = None) -> NDArray:
 
         assert (self.vecs is None) ^ (inputs is None)
 
@@ -137,12 +138,15 @@ class EmbeddingEvaluator:
         except AttributeError:
             pass
 
+        return embedded_vecs
+
+    def evaluate(self, embedder: torch.nn.Module | Callable = None, inputs: torch.Tensor = None) -> EmbeddingEvalResult:
+        embedded_vecs = self.get_embedded_vecs(embedder, inputs)
         result = evaluate_embedded_vecs(
             embedded_vecs=embedded_vecs,
             pairs=self.paired_items,
             is_same=self.is_same,
             loss_func=self.loss_func)
-
         return result
 
     def summary_string(self) -> str:

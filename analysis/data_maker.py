@@ -1,20 +1,20 @@
-import pandas as pd
-from motorneural.datasets.hatsopoulos import make_hatso_data, HATSO_DATASET_SPECS, get_hatso_datasets
-from motorneural.data import Segment, Trial, validate_data_slices
-import numpy as np
-import matplotlib.pyplot as plt
-import paths
-from common.utils import picklestore as pickle
-from common.utils.typings import *
-from common import symmetric_pairs
-from analysis.config import DataConfig, Config
-from analysis.data_manager import DataMgr, convert_segment_uid_to_num_inplace
-from multiprocessing import Pool
+import os
 from datetime import datetime
 from glob import glob
-import os
-from common.utils.planar_align import PlanarAligner
+from multiprocessing import Pool
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import paths
+from analysis.config import DataConfig, Config
+from analysis.data_manager import DataMgr, convert_segment_uid_to_num_inplace
+from common.utils import symmetric_pairs
+from common.utils import picklestore as pickle
 from common.utils.distance_metrics import get_metric_func
+from common.utils.planar_align import PlanarAligner
+from common.utils.typings import *
+from motorneural.data import Segment, Trial, validate_data_slices
+from motorneural.datasets.hatsopoulos import make_hatso_data, HATSO_DATASET_SPECS
 
 
 def make_and_save(cfg: DataConfig, force: int = 0, upto: DataConfig.Level = None) -> None:
@@ -307,7 +307,7 @@ def calc_pairing(segments: list[Segment],
 def run__make_and_save():
     force = 0
     datasets = ['TP_RS', 'TP_RJ']
-    datasets = datasets[:1]
+    datasets = datasets[1:]
     #datasets = get_hatso_datasets(task='TP')
     upto = None # DataConfig.TRIALS
     bin_sizes = [None]

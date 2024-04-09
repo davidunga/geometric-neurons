@@ -1,12 +1,12 @@
 """
 Motor and kinematic data processing + containers
 """
-from scipy.ndimage.filters import gaussian_filter1d
-import pandas as pd
-from motorneural.npdataframe import NpDataFrame
-from motorneural.typetools import *
-
 import geometrik as gk
+import pandas as pd
+from scipy.ndimage.filters import gaussian_filter1d
+from . npdataframe import NpDataFrame
+from . typetools import *
+
 
 # ----------------------------------
 

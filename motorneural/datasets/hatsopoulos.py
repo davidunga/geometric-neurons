@@ -47,14 +47,15 @@ Structure:
 
 # -----------------------
 
+import re
 from pathlib import Path
 import numpy as np
-from motorneural.data import Trial, postprocess_trials_inplace, validate_data_slices
-from motorneural.neural import NeuralData, PopulationSpikeTimes
-from motorneural.motor import KinData, kinematics
 from scipy.io import loadmat
-import re
-from motorneural.typetools import Callable
+from ..data import Trial, postprocess_trials_inplace, validate_data_slices
+from ..motor import KinData, kinematics
+from ..neural import NeuralData, PopulationSpikeTimes
+from typing import Callable
+from copy import deepcopy
 
 # -----------------------
 
@@ -64,26 +65,29 @@ HATSO_DATASET_SPECS = {
         "task": "TP",
         "monkey": "RS",
         "brain_sites": ["m1"],
+        "total_neurons": 100,
         "trials_blacklist": [2, 92, 151, 167, 180, 212, 244, 256,
                              325, 415, 457, 508, 571, 662, 686, 748]
     },
-    "TP_RS_PMD": "auto",
     "TP_RJ": {
         "file": "r1031206_PMd_MI_modified_clean_spikesSNRgt4.mat",
         "task": "TP",
         "monkey": "RJ",
         "brain_sites": ["m1"],
+        "total_neurons": 54,
         "trials_blacklist": [4, 10, 30, 43, 44, 46, 53, 66, 71, 78, 79, 84, 85, 91, 106,
                              107, 118, 128, 141, 142, 145, 146, 163, 165, 172, 173, 180,
                              185, 203, 209, 210, 245, 254, 260, 267, 270, 275, 278, 281,
                              283, 288, 289, 302, 313, 314, 321, 326, 340, 350, 363, 364,
                              366, 383, 385, 386, 390, 391]
     },
+    "TP_RJ_PMD": {"_placeholder_"},
     "CO_RS_01": {
         "file": "rs1050225_clean_SNRgt4.mat",
         "task": "CO",
         "monkey": "RS",
         "brain_sites": ["m1"],
+        "total_neurons": None,  # either 141 or 68 - need to check
         "trials_blacklist": []
     },
     "CO_RS_02": {
@@ -91,12 +95,12 @@ HATSO_DATASET_SPECS = {
         "task": "CO",
         "monkey": "RS",
         "brain_sites": ["m1"],
+        "total_neurons": None,  # either 141 or 68 - need to check
         "trials_blacklist": []
     }
 }
-
-HATSO_DATASET_SPECS["TP_RS_PMD"] = HATSO_DATASET_SPECS["TP_RS"].copy()
-HATSO_DATASET_SPECS["TP_RS_PMD"]["brain_sites"] = ["pmd"]
+HATSO_DATASET_SPECS["TP_RJ_PMD"] = deepcopy(HATSO_DATASET_SPECS["TP_RJ"])
+HATSO_DATASET_SPECS["TP_RJ_PMD"].update({"brain_sites": ["pmd"], "total_neurons": 50})
 
 
 def get_hatso_datasets(**kwargs):
@@ -143,7 +147,7 @@ def make_hatso_data(data_dir: Path, dataset: str, lag: float, bin_sz: float) -> 
 
 def construct_hatso_trials(
         file: str, brain_sites: list[str], lag: float, bin_sz: float,
-        smooth_dur: (str, float) = 'auto', kin_fnc: Callable[None, KinData] = None,
+        smooth_dur: (str, float) = 'auto', kin_fnc: Callable[..., KinData] = None,
         trials_blacklist: list[int] = None, max_trials: int = None) -> list[Trial]:
 
     if kin_fnc is None:

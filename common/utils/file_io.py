@@ -1,6 +1,7 @@
-from pathlib import Path
-import pandas as pd
 import pickle
+from pathlib import Path
+
+import pandas as pd
 
 
 class FileIO:

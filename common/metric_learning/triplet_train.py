@@ -1,19 +1,16 @@
-import datetime
-
+import shutil
+from time import time
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from time import time
-from pathlib import Path
-import shutil
+from common.metric_learning.embedding_eval import EmbeddingEvalResult, EmbeddingEvaluator
+from common.metric_learning.triplet_sampler import TripletSampler
+from common.metric_learning.triplet_loss import TripletLossWithIntermediates
 from common.utils import dlutils
-from common.pairwise.embedding_eval import EmbeddingEvalResult, EmbeddingEvaluator
+from common.utils import tbtools
 from common.utils.devtools import progbar
 from common.utils.typings import *
-from common.utils.devtools import verbolize
-from common.utils import tbtools
-from common.pairwise.sameness import TripletSampler, TripletLossWithIntermediates
 
 
 def triplet_train(
@@ -190,24 +187,21 @@ def triplet_train(
 
             if noise_sigma:
                 white_noise = torch.randn(inputs.shape, generator=torch_rng, device=device, dtype=inputs.dtype)
-                noisey_inputs = inputs + noise_scale * white_noise
+                noisy_inputs = inputs + noise_scale * white_noise
             else:
-                noisey_inputs = inputs
+                noisy_inputs = inputs
 
             optimizer.zero_grad()
             A, P, N, is_hard = train_sampler.sample(n=batch_size, rand_state=batch).T
 
-            sample_counts[A] += 1
-            sample_counts[P] += 1
-            sample_counts[N] += 1
-            noisy_inputs = torch.randn(inputs.shape, generator=torch_rng, device=device, dtype=inputs.dtype)
+            embedded_A = model(noisy_inputs[A])
+            embedded_P = model(noisy_inputs[P])
+            embedded_N = model(noisy_inputs[N])
 
-            embedded_A = model(noisey_inputs[A])
-            embedded_P = model(noisey_inputs[P])
-            embedded_N = model(noisey_inputs[N])
             loss, losses, p_dists, n_dists = triplet_loss(anchor=embedded_A, positive=embedded_P, negative=embedded_N)
             loss.backward()
             optimizer.step()
+
             model_file.touch()
 
             dists[A, P] = p_dists
@@ -215,6 +209,9 @@ def triplet_train(
 
             indexes = range(batch * batch_size, (batch + 1) * batch_size)
             epoch_history.loc[indexes, :] = np.c_[losses, p_dists, n_dists, is_hard]
+            sample_counts[A] += 1
+            sample_counts[P] += 1
+            sample_counts[N] += 1
 
         assert sample_counts[train_sampler.included_items].sum() == sample_counts.sum()
 

@@ -2,9 +2,10 @@
 Dictionary tools
 """
 
-from itertools import product, chain
 from copy import deepcopy
+from itertools import product, chain
 from typing import Callable
+
 import numpy as np
 import pandas as pd
 

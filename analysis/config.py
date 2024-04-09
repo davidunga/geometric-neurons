@@ -1,11 +1,12 @@
 import json
 from dataclasses import dataclass
-import paths
 import yaml
 from munch import munchify, Munch
+from paths import ANALYSIS_DIR
 from common.utils import dictools, hashtools
+from copy import deepcopy
 
-_configs_grid = yaml.safe_load((paths.CONFIG_DIR / 'configs_grid.yml').open())
+_configs_grid = yaml.safe_load((ANALYSIS_DIR / 'configs_grid.yml').open('r'))
 
 
 @dataclass(init=False)
@@ -16,6 +17,9 @@ class Config:
         self.data = DataConfig(cfg.data)
         self.model = ModelConfig(cfg.model)
         self.training = TrainingConfig(cfg.training)
+
+    def copy(self):
+        return Config(deepcopy(self.__dict__))
 
     @classmethod
     def from_default(cls):

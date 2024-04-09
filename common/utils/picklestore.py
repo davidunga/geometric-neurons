@@ -1,9 +1,8 @@
-import pickle
-import os
 import io
+import os
 from pathlib import Path
-
 import pandas as pd
+import pickle
 
 """
 
@@ -70,6 +69,9 @@ def load(pkl: str | io.BufferedReader | Path, keys: str | list[str] = '?'):
             # (file is already open)
             return pickle.load(pkl_buffer)
         try:
+            #from common.utils.robust_pickle import RobustUnpickler2
+            #import pickle as pickle2
+            #pickle2.Unpickler = RobustUnpickler2
             with open(get_file(pkl, key), 'rb') as f:
                 return pickle.load(f)
         except:

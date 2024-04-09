@@ -1,7 +1,9 @@
 from typing import Sequence
-import pandas as pd
+
 import numpy as np
 import numpy.typing
+import pandas as pd
+
 from common.utils.sigproc import reduce_rows
 
 

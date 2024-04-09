@@ -1,12 +1,12 @@
-from common.utils.devtools import verbolize
-from common.utils import strtools
-from motorneural.typetools import *
-from motorneural.neural import NeuralData
-from motorneural.motor import KinData
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import numpy as np
-from sklearn.decomposition import PCA
 import pandas as pd
+from sklearn.decomposition import PCA
+from common.utils import strtools
+from common.utils.devtools import verbolize
+from . motor import KinData
+from . neural import NeuralData
+from . typetools import *
 
 
 @dataclass

@@ -19,7 +19,7 @@ data:
       variable: neural
       bin_sz: [.05]
       drop_zero_variance: True
-      normalize: [True, False]
+      normalize: [True]
 
 model:
   dim: [3]
@@ -39,7 +39,7 @@ training:
   batch_size: [64]
   batches_in_epoch: 4000
   n_eval_triplets: 5000
-  loss_margin: [1., 5.]
+  loss_margin: [1.]
   optim_params:
     kind: [SGD]
-    lr: [1.e-05, 1.e-04, 1.e-03]
+    lr: [1.e-04, 1.e-03]

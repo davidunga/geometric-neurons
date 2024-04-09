@@ -1,12 +1,12 @@
 """
 Handles processing and storing neural information
 """
-from motorneural.npdataframe import NpDataFrame
 from collections import Counter
-import pandas as pd
-from scipy.ndimage import gaussian_filter1d, uniform_filter1d
-from motorneural.typetools import *
 import numpy as np
+import pandas as pd
+from scipy.ndimage import gaussian_filter1d
+from . npdataframe import NpDataFrame
+from . typetools import *
 
 
 def make_bin_edges(low: float, high: float, bin_size: int) -> NpVec[float]:
