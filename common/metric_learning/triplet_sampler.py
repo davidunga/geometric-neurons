@@ -5,12 +5,27 @@ from common.utils.typings import *
 
 
 class TripletSampler:
+    """ Manages sampling of (anchor, positive, negative) triplets for metric learning
+        Supports hard sampling
+    """
 
-    def __init__(self, sameness_mtx: sparse.csr_array, dist_mtx: sparse.csr_array, p_hard: float = 0):
+    def __init__(self, sameness_mtx: sparse.csr_array,
+                 dist_mtx: sparse.csr_array = None, p_hard: float = 0):
+        """
+        Initialize triplet sampling from N items.
+        Args:
+            sameness_mtx: sparse N*N matrix with values (-1, 1):
+                sameness_mtx[i,j] = 1 <-> i & j are the same
+                sameness_mtx[i,j] = -1 <-> i & j are not the same
+                sameness_mtx[i,j] = 0 <-> i & j is not a valid pair (ignored)
+            dist_mtx: sparse N*N matrix of pairwise distances, used for hard sampling.
+            p_hard: proportion of hard triplets in each call to sample()
+        """
+
         self.p_hard = p_hard
         self._sameness_mtx = sameness_mtx
-        self._uniform_probas = TripletSampler._calc_sampling_probas(sameness_mtx, None)
         self._dist_mtx = None
+        self._uniform_probas = TripletSampler._calc_sampling_probas(sameness_mtx, None)
         self._hard_probas = None
         self.included_items = sorted(list(set(np.r_[sameness_mtx.nonzero()].flatten())))
         self.update_dist_mtx(dist_mtx)
@@ -24,6 +39,12 @@ class TripletSampler:
 
     @staticmethod
     def _calc_sampling_probas(sameness_mtx, dist_mtx):
+        """
+        returns:
+            anchor_p: anchor_p[i] = chance of sampling item i as anchor
+            same_p: same_p[i,j] = chance of sampling item j as positive, for anchor i
+            notSame_p: notSame_p[i,j] = chance of sampling item j as negative, for anchor i
+        """
 
         same_p = (sameness_mtx == 1).astype(float)
         notSame_p = (sameness_mtx == -1).astype(float)
@@ -53,12 +74,15 @@ class TripletSampler:
         return anchor_p, same_p, notSame_p
 
     def sample_uniform(self, n: int, rand_state: RandState) -> NDArray[int]:
-        return _sample_by_probas(*self._uniform_probas, n, rand_state)
+        """ sample triplets, ignore distance information """
+        return _sample_triplets_by_probas(*self._uniform_probas, n, rand_state)
 
     def sample_hard(self, n: int, rand_state: RandState) -> NDArray[int]:
-        return _sample_by_probas(*self._hard_probas, n, rand_state)
+        """ sample hard triplets, based on distances """
+        return _sample_triplets_by_probas(*self._hard_probas, n, rand_state)
 
     def sample(self, n: int, rand_state: RandState) -> NDArray[int]:
+        """ sample triplets, number of hard triplets determined by p_hard """
         rng = np.random.default_rng(rand_state)
         n_hard = int(round(self.p_hard * n))
         is_hard = (np.arange(n) < (n - n_hard)).astype(int)
@@ -84,7 +108,18 @@ class TripletSampler:
         return s
 
 
-def _sample_by_probas(anchor_p, same_p, notSame_p, n, rand_state) -> NDArray[int]:
+def _sample_triplets_by_probas(anchor_p, same_p, notSame_p, n, rand_state) -> NDArray[int]:
+    """
+    sample n triplets out of N items
+    Args:
+        anchor_p: 1*N array, chance of sampling each item as anchor
+        same_p: N*N matrix, same_p[i,j] chance of sampling j as positive of anchor i
+        notSame_p: N*N matrix, notSame_p[i,j] chance of sampling j as negative of anchor i
+        n: number of triplets to sample
+        rand_state: random seed or generator
+    Returns:
+        n*3 numpy int array, each row = [anchor, positive, negative]
+    """
     n_total_items = len(anchor_p)
     rng = np.random.default_rng(rand_state)
     triplets = np.zeros((n, 3), int)

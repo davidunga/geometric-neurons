@@ -4,8 +4,15 @@ from common.utils.typings import *
 
 
 class TripletLossWithIntermediates(torch.nn.Module):
-
+    """
+    triplet loss which also returns the loss and distances for each triplet
+    """
     def __init__(self, margin: float, detach_intermediates: bool = True):
+        """
+        Args:
+            margin: the triplet loss margin
+            detach_intermediates: return the per-triplet values as detached numpy arrays
+        """
         super().__init__()
         self.margin = margin
         self.detach_intermediates = detach_intermediates
