@@ -15,7 +15,7 @@ pickle = get_robust_pickle_module([embedding_models])
 def safe_predict(model: torch.nn.Module, x: NDArray | torch.Tensor) -> NDArray:
     is_training = model.training
     model.train(False)
-    x = model(torch.as_tensor(x, dtype=torch.float32)).detach().cpu.numpy()
+    x = model(torch.as_tensor(x, dtype=torch.float32)).detach().cpu().numpy()
     model.train(is_training)
     return x
 
