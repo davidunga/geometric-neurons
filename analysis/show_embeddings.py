@@ -10,6 +10,8 @@ from pathlib import Path
 import torch
 from common.metric_learning import embedding_eval
 import cv_results_mgr
+from scipy.spatial.distance import pdist, squareform
+from common.utils.planar_align import PlanarAligner
 
 
 def _convert_to_test_config(cfg: Config | dict) -> Config:
@@ -22,10 +24,107 @@ def _convert_to_test_config(cfg: Config | dict) -> Config:
     return cfg
 
 
+def _get_random_subset(x, n, rng):
+    if isinstance(rng, int):
+        rng = np.random.default_rng(rng)
+    return rng.permutation(x)[:n]
+
+
+def _fill(pts1, pts2, *args, **kwargs):
+    x = np.r_[pts1[:, 0], pts2[:, 0][::-1]]
+    y = np.r_[pts1[:, 1], pts2[:, 1][::-1]]
+    plt.fill(x, y, *args, **kwargs)
+
+
+def draw_trajectories_grouped_by_embedded_dist(model_file):
+    """
+    group segments by their embedding distance, and draw trajectories of a random subset of
+    the groups.
+    """
+    # -----------------------
+    n_groups_to_draw = 8
+    n_segs_in_group = 20
+    near_thresh = .2
+    far_thresh = 4.
+    seed = 1
+    # -----------------------
+
+    aligners = [PlanarAligner('offset'), PlanarAligner('rigid'), PlanarAligner('ortho')]
+    rng = np.random.default_rng(seed)
+
+    def _draw_group_trajs(seg_ixs, aligner):
+        # ----
+        linewidth = 2
+        alpha_by_normalized_zscore = False
+        uniform_color = True
+        # ----
+
+        aligned_trajs = [aligner(parabola, trajs[ix])[0] for ix in seg_ixs]
+
+        if alpha_by_normalized_zscore:
+            min_alpha, max_alpha = .2, .4
+            mu = np.mean(aligned_trajs, axis=0)
+            dist_from_mu = np.array([np.linalg.norm(trj - mu) for trj in aligned_trajs])
+            dist_from_mu = (dist_from_mu - dist_from_mu.min()) / (dist_from_mu.max() - dist_from_mu.min())
+            alpha = min_alpha + (1 - dist_from_mu) * (max_alpha - min_alpha)
+        else:
+            alpha = np.ones(len(seg_ixs)) * .2
+
+        lms = 2 * traj_scale
+        color = 'dodgerBlue' if uniform_color else None
+        for i, aligned_traj in enumerate(aligned_trajs):
+            plt.plot(*aligned_traj.T, lw=linewidth, alpha=alpha[i], color=color)
+            plt.xlim([-lms, lms])
+            plt.ylim([-lms, lms])
+            plt.gca().set_aspect('equal', adjustable='box')
+
+    # --------
+
+    model, cfg = cv_results_mgr.get_model_and_config(model_file)
+    data_mgr = DataMgr(cfg.data)
+    trajs = data_mgr.get_pairing_trajectories()
+    vecs, _ = data_mgr.get_inputs()
+    
+    traj_scale = 2 * np.mean([np.std(traj, axis=0).mean() for traj in trajs])
+
+    seg_sz = len(trajs[0])
+    parabola = traj_scale * np.c_[np.linspace(-1, 1, seg_sz), np.linspace(-1, 1, seg_sz) ** 2]
+    parabola -= parabola.mean()
+    
+    # normalized embedded distances
+    embedded_vecs = dlutils.safe_predict(model, vecs)
+    embedded_vecs -= embedded_vecs.mean(axis=0)
+    embedded_vecs /= np.std(embedded_vecs, axis=0)
+    embedded_dists = squareform(pdist(embedded_vecs))
+
+    # near/far in embedding space
+    is_near = embedded_dists < near_thresh
+    is_far = embedded_dists > far_thresh
+
+    # segments that have sufficient nears & fars:
+    valids_segs = np.nonzero(np.minimum(np.sum(is_near, axis=1), np.sum(is_far, axis=1)) > n_segs_in_group)[0]
+    segs_to_draw = _get_random_subset(valids_segs, n_groups_to_draw, rng)
+
+    for group_type in ['near', 'far']:
+        _, axs = plt.subplots(ncols=n_groups_to_draw, nrows=len(aligners))
+        plt.suptitle(group_type)
+        for j, seg_ix in enumerate(segs_to_draw):
+            if group_type == 'near':
+                seg_ixs = _get_random_subset(np.nonzero(is_near[seg_ix])[0], n_segs_in_group, rng)
+            else:
+                assert group_type == 'far'
+                seg_ixs = _get_random_subset(np.nonzero(is_far[seg_ix])[0], n_segs_in_group, rng)
+            for i, aligner in enumerate(aligners):
+                plt.sca(axs[i, j])
+                _draw_group_trajs(seg_ixs, aligner)
+                if j == 0: plt.ylabel(aligner.kind)
+
+    plt.show()
+
 
 def draw_embedded_vs_metric_dists(model_file):
 
-    embedder, cfg = cv_results_mgr.get_model_and_config(model_file)
+    model, cfg = cv_results_mgr.get_model_and_config(model_file)
     cfg = _convert_to_test_config(cfg)
     data_mgr = DataMgr(cfg.data)
     pairs_df = data_mgr.load_pairing()
@@ -43,17 +142,15 @@ def draw_embedded_vs_metric_dists(model_file):
 
     for embed in [False, True]:
         if embed:
-            embedded_vecs = embedder(vecs)
+            embedded_vecs = model(vecs)
         else:
             embedded_vecs = vecs
-
         embedded_vecs = embedded_vecs.detach().cpu().numpy()
         embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
         plot_binned_stats(x=metric_dists, y=embedded_dists, n_bins=10, kind='p', stat='avg', err='se')
         plt.title(f"Embed={embed}")
     plt.show()
 
-    print(".")
 
 
 # ------ helpers
@@ -137,4 +234,5 @@ def plot_binned_stats(x, y, n_bins, kind, stat: str = 'avg', err: str = 'auto'):
 
 if __name__ == "__main__":
     file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
-    draw_embedded_vs_metric_dists(file)
+    draw_trajectories_grouped_by_embedded_dist(file)
+    #draw_embedded_vs_metric_dists(file)
