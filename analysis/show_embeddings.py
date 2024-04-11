@@ -43,18 +43,18 @@ def draw_trajectories_grouped_by_embedded_dist(model_file):
     """
     # -----------------------
     n_groups_to_draw = 8
-    n_segs_in_group = 20
-    near_thresh = .2
-    far_thresh = 4.
+    n_segs_in_group = 10
+    near_thresh_p = 1
+    far_thresh_p = 99
     seed = 1
     # -----------------------
 
-    aligners = [PlanarAligner('offset'), PlanarAligner('rigid'), PlanarAligner('ortho')]
+    aligners = [PlanarAligner('offset'), PlanarAligner('rigid'), PlanarAligner('affine')]
     rng = np.random.default_rng(seed)
 
     def _draw_group_trajs(seg_ixs, aligner):
         # ----
-        linewidth = 2
+        linewidth = 1
         alpha_by_normalized_zscore = False
         uniform_color = True
         # ----
@@ -87,33 +87,39 @@ def draw_trajectories_grouped_by_embedded_dist(model_file):
     
     traj_scale = 2 * np.mean([np.std(traj, axis=0).mean() for traj in trajs])
 
+    # build shape to align trajectories to
     seg_sz = len(trajs[0])
     parabola = traj_scale * np.c_[np.linspace(-1, 1, seg_sz), np.linspace(-1, 1, seg_sz) ** 2]
     parabola -= parabola.mean()
     
     # normalized embedded distances
     embedded_vecs = dlutils.safe_predict(model, vecs)
-    embedded_vecs -= embedded_vecs.mean(axis=0)
-    embedded_vecs /= np.std(embedded_vecs, axis=0)
-    embedded_dists = squareform(pdist(embedded_vecs))
+    embedded_dists = pdist(embedded_vecs)
+    near_thresh, far_thresh = np.percentile(embedded_dists, [near_thresh_p, far_thresh_p])
+    embedded_dists = squareform(embedded_dists)
 
     # near/far in embedding space
     is_near = embedded_dists < near_thresh
     is_far = embedded_dists > far_thresh
 
-    # segments that have sufficient nears & fars:
+    # chose segments to draw along with their near/far groups:
     valids_segs = np.nonzero(np.minimum(np.sum(is_near, axis=1), np.sum(is_far, axis=1)) > n_segs_in_group)[0]
+    print("n valids:", len(valids_segs))
     segs_to_draw = _get_random_subset(valids_segs, n_groups_to_draw, rng)
+
+    # near/far segments group for each chosen segment:
+    groups = {}
+    for seg_ix in segs_to_draw:
+        groups[seg_ix] = {
+            'near': _get_random_subset(np.nonzero(is_near[seg_ix])[0], n_segs_in_group, rng),
+            'far': _get_random_subset(np.nonzero(is_far[seg_ix])[0], n_segs_in_group, rng)
+        }
 
     for group_type in ['near', 'far']:
         _, axs = plt.subplots(ncols=n_groups_to_draw, nrows=len(aligners))
         plt.suptitle(group_type)
         for j, seg_ix in enumerate(segs_to_draw):
-            if group_type == 'near':
-                seg_ixs = _get_random_subset(np.nonzero(is_near[seg_ix])[0], n_segs_in_group, rng)
-            else:
-                assert group_type == 'far'
-                seg_ixs = _get_random_subset(np.nonzero(is_far[seg_ix])[0], n_segs_in_group, rng)
+            seg_ixs = groups[seg_ix][group_type]
             for i, aligner in enumerate(aligners):
                 plt.sca(axs[i, j])
                 _draw_group_trajs(seg_ixs, aligner)
