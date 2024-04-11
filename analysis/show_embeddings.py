@@ -14,16 +14,6 @@ from scipy.spatial.distance import pdist, squareform
 from common.utils.planar_align import PlanarAligner
 
 
-def _convert_to_test_config(cfg: Config | dict) -> Config:
-    if isinstance(cfg, dict):
-        cfg = Config(cfg)
-    cfg = cfg.copy()
-    cfg.data.pairing.notSame_pctl = cfg.data.pairing.same_pctl
-    cfg.data.pairing.exclude_pctl = .5
-    cfg.data.pairing.balance = False
-    return cfg
-
-
 def _get_random_subset(x, n, rng):
     if isinstance(rng, int):
         rng = np.random.default_rng(rng)
@@ -131,7 +121,7 @@ def draw_trajectories_grouped_by_embedded_dist(model_file):
 def draw_embedded_vs_metric_dists(model_file):
 
     model, cfg = cv_results_mgr.get_model_and_config(model_file)
-    cfg = _convert_to_test_config(cfg)
+    cfg = cfg.get_as_eval_config()
     data_mgr = DataMgr(cfg.data)
     pairs_df = data_mgr.load_pairing()
 
@@ -140,6 +130,14 @@ def draw_embedded_vs_metric_dists(model_file):
     n_samples = min(50_000, len(pairs_df))
     sampled_ranks = np.round(np.linspace(0, len(pairs_df) - 1, n_samples)).astype(int)
     pairs_df = pairs_df.loc[sampled_ranks, :]
+
+    from common.utils.polytools import total_arclen
+    trajs = data_mgr.get_pairing_trajectories()
+    arclens = np.array([total_arclen(traj) for traj in trajs])
+    arclens1 = arclens[pairs_df['seg1'].to_numpy()]
+    arclens2 = arclens[pairs_df['seg2'].to_numpy()]
+    arclen_diff = np.abs(arclens2 - arclens1)
+    arclen_rdiff = 2. * arclen_diff / (arclens2 + arclens1)
 
     metric_dists = pairs_df['dist'].to_numpy()
 
@@ -155,6 +153,15 @@ def draw_embedded_vs_metric_dists(model_file):
         embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
         plot_binned_stats(x=metric_dists, y=embedded_dists, n_bins=10, kind='p', stat='avg', err='se')
         plt.title(f"Embed={embed}")
+
+    embedded_vecs = model(vecs)
+    embedded_vecs = embedded_vecs.detach().cpu().numpy()
+    for dff in ['df', 'rdf']:
+        xx = arclen_diff if dff == 'df' else arclen_rdiff
+        embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
+        plot_binned_stats(x=xx, y=embedded_dists, n_bins=10, kind='p', stat='avg', err='se')
+        plt.title(dff)
+
     plt.show()
 
 
@@ -240,5 +247,5 @@ def plot_binned_stats(x, y, n_bins, kind, stat: str = 'avg', err: str = 'auto'):
 
 if __name__ == "__main__":
     file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
-    draw_trajectories_grouped_by_embedded_dist(file)
-    #draw_embedded_vs_metric_dists(file)
+    #draw_trajectories_grouped_by_embedded_dist(file)
+    draw_embedded_vs_metric_dists(file)
