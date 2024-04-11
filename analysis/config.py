@@ -5,15 +5,17 @@ from munch import munchify, Munch
 from paths import ANALYSIS_DIR
 from common.utils import dictools, hashtools
 from copy import deepcopy
+from common.utils import dictools
 
 _configs_grid = yaml.safe_load((ANALYSIS_DIR / 'configs_grid.yml').open('r'))
+_config_mods_for_eval = yaml.safe_load((ANALYSIS_DIR / 'config_mods_for_eval.yml').open('r'))
 
 
 @dataclass(init=False)
 class Config:
 
     def __init__(self, cfg: dict):
-        cfg = munchify(cfg)
+        cfg = munchify(dictools.inherit_values(cfg))
         self.data = DataConfig(cfg.data)
         self.model = ModelConfig(cfg.model)
         self.training = TrainingConfig(cfg.training)
@@ -53,6 +55,9 @@ class Config:
     def output_name(self) -> str:
         hash_size = 6
         return self.data.str(DataConfig.OUTPUT) + " " + hashtools.calc_hash(self.__dict__, fmt='hex')[:hash_size]
+
+    def get_as_eval_config(self):
+        return _get_modified_config(self, _config_mods_for_eval)
 
 
 class DataConfig(Munch):
@@ -97,3 +102,9 @@ class ModelConfig(Munch):
 
 class TrainingConfig(Munch):
     pass
+
+
+def _get_modified_config(cfg, mod_dict: dict):
+    """ get a copy of config, recursively modified by mod_dict """
+    modified_dict = dictools.deep_merge(deepcopy(cfg.__dict__), mod_dict)
+    return Config(modified_dict)
