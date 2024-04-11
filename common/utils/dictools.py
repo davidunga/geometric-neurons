@@ -93,6 +93,36 @@ def rename(d: dict, **kwargs) -> dict:
     return {kwargs.get(k, k): v for k, v in d.items()}
 
 
+def inherit_values(d: dict, sep: str = '.', prefix: str = '::'):
+    """ replace values of the form '::<key_path>' with d[<key_path>] """
+    d_flat = flatten_dict(d, sep=sep)
+    for k in d_flat:
+        if isinstance(d_flat[k], str) and d_flat[k].startswith(prefix):
+            key = d_flat[k][len(prefix):]
+            d_flat[k] = d_flat[key]
+    return unflatten_dict(d_flat, sep)
+
+
+def deep_merge(d1: dict, d2: dict, keep_structure: bool = True) -> dict:
+    """ recursively overwrite values in d1 from d2, if they exist in d2.
+        d2 must be a recursive subset of d1.
+    """
+
+    assert set(d2.keys()).issubset(d1.keys()), "modifier is not a subset of base"
+
+    def _get(k):
+        if k not in d2:
+            return d1[k]
+        elif isinstance(d2[k], dict):
+            return deep_merge(d1[k], d2[k])
+        else:
+            if keep_structure:
+                assert not isinstance(d1[k], dict)
+            return d2[k]
+
+    return {k: _get(k) for k in d1}
+
+
 def modify_dict(base_dict: dict, copy: bool, exclude: list = None,
                 include: list = None, update_dict: dict = None):
 
@@ -181,14 +211,3 @@ def dict_recursive(d: dict, fn: Callable[[dict], dict]) -> dict:
     """
     return {k: v if not isinstance(k, dict) else dict_recursive(v, fn)
             for k, v in fn(d).items()}
-
-
-if __name__ == "__main__":
-    d = {"a": {"aa": [[11, 12]], "bb.GRID": [22, 23]}, "b.GRID": [2, 3]}
-    # d = {
-    #     'Alice': {'city': 'LA', 'id': 123},
-    #     'Bob': {'city': 'NY', 'id': 567}
-    # }
-    print(unpack_nested_dict(d))
-    for d in dict_product_from_grid(d, suffix=''):
-        print(d)
