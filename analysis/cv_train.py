@@ -165,7 +165,7 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
            group: int | str = None,
            early_stop_epoch: int = None,
            cfg_name_include: str = None,
-           cfg_name_exclude: str = None):
+           cfg_name_exclude: str = None, **kwargs):
 
     cfgs = [cfg for cfg in Config.yield_from_grid()]
     max_folds = max([cfg.training.cv.folds for cfg in cfgs])
@@ -188,7 +188,7 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
             print(grid_cfgs_df.loc[cfg_ix].to_string())
 
             training_mgr = TrainingMgr(cfg, fold=fold, dbg_run=dbg_run, early_stop_epoch=early_stop_epoch,
-                                       exists_handling=exists_handling, group=group)
+                                       exists_handling=exists_handling, group=group, **kwargs)
             success = training_mgr.dispatch()
             if success:
                 cv_results_mgr.refresh_results_file()
@@ -196,4 +196,4 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
 
 if __name__ == "__main__":
     cv_results_mgr.refresh_results_file()
-    run_cv(exists_handling="overwrite", dbg_run=False, early_stop_epoch=None)
+    run_cv(exists_handling="overwrite", dbg_run=False, early_stop_epoch=None, device='auto')

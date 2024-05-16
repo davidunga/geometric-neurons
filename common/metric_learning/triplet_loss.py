@@ -31,7 +31,7 @@ def triplet_loss_with_intermediates(
     losses = torch.clamp_min(margin + pos_dists - neg_dists, 0)
     loss = torch.mean(losses)
     if detach_intermediates:
-        losses = losses.detach().numpy()
-        pos_dists = pos_dists.detach().numpy()
-        neg_dists = neg_dists.detach().numpy()
+        losses = losses.detach().cpu().numpy()
+        pos_dists = pos_dists.detach().cpu().numpy()
+        neg_dists = neg_dists.detach().cpu().numpy()
     return loss, losses, pos_dists, neg_dists
