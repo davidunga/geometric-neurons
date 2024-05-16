@@ -196,4 +196,4 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
 
 if __name__ == "__main__":
     cv_results_mgr.refresh_results_file()
-    run_cv(exists_handling="overwrite", dbg_run=False, early_stop_epoch=20)
+    run_cv(exists_handling="overwrite", dbg_run=False, early_stop_epoch=None)

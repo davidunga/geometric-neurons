@@ -22,8 +22,8 @@ data:
       normalize: [True]
 
 model:
-  dim: [3]
-  dropout: [.75]
+  dim: [3, 5]
+  dropout: [.5, .75]
 
 training:
   cv:
@@ -33,7 +33,7 @@ training:
     patience: null
     overfit: 100
     converge: 1.e-4
-  noise_sigma: [.2, .5]
+  noise_sigma: [.05, .2, .5]
   p_hard: [.5]
   epochs: 100
   batch_size: [64]
@@ -41,5 +41,5 @@ training:
   n_eval_triplets: 5000
   loss_margin: [1.]
   optim_params:
-    kind: [SGD]
-    lr: [1.e-04, 1.e-03]
+    kind: [SGD, Adam]
+    lr: [1.e-05, 1.e-04, 1.e-03]
