@@ -143,6 +143,9 @@ def triplet_train(
 
     inputs = torch.as_tensor(inputs, device=device, dtype=torch.float32)
     model.to(device=device, dtype=torch.float32)
+    device_count = dlutils.device_count(model)
+    if device_count > 1:
+        model = torch.nn.DataParallel(model)
     model.train()
 
     torch_rng = torch.Generator(device=device)
@@ -151,7 +154,7 @@ def triplet_train(
     assert set(train_sampler.included_items).isdisjoint(val_sampler.included_items)
     print("Confirmed Zero train/validation overlap")
 
-    print("Device:", device)
+    print(f"Device: {device} ({device_count})")
     print("Train data:")
     print("   ", train_sampler.summary_string())
     print("Train Eval:")

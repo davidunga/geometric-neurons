@@ -49,6 +49,10 @@ def get_torch_device(device: str = 'auto') -> str:
     return 'cpu'
 
 
+def device_count(model):
+    return torch.cuda.device_count() if next(model.parameters()).is_cuda else 1
+
+
 class SnapshotMgr:
 
     """
