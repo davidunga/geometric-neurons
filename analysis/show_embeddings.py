@@ -7,50 +7,77 @@ from config import Config
 from data_manager import DataMgr
 from common.utils.typings import *
 from pathlib import Path
+from common.utils import plotting
+from common.utils import stats
 import torch
 from common.metric_learning import embedding_eval
 import cv_results_mgr
 from scipy.spatial.distance import pdist, squareform
 from common.utils.planar_align import PlanarAligner
+from analysis.neural_population import NeuralPopulation, NEURAL_POP
+from collections import Counter
+from motorneural.data import Segment
+from common.utils import strtools
+from scipy.stats import ks_2samp, anderson_ksamp
+from common.utils.randtool import Rnd
+from sklearn.cluster import KMeans, AgglomerativeClustering, MeanShift, MiniBatchKMeans
+import dataslice_properties
+from sklearn.decomposition import PCA
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.preprocessing import LabelEncoder
+from common.utils import conics
+from common.utils import polytools
 
 
-def _get_random_subset(x, n, rng):
-    if isinstance(rng, int):
-        rng = np.random.default_rng(rng)
-    return rng.permutation(x)[:n]
+def fit_conic_to_traj_raster(paths_raster, raster_value_thresh: float = .1,
+                             n_samples_per_col: int = 3, kind: str = 'p', ransac_tol: float = 2,
+                             allow_rotation: bool = False, ransac_max_iters: int = 5000):
+
+    x = np.tile(np.arange(paths_raster.shape[1]), n_samples_per_col)
+    y = np.argsort(paths_raster, axis=0)[-n_samples_per_col:].flatten()
+    v = paths_raster[y, x]
+    ii = v > raster_value_thresh
+    v = v[ii]
+    pts = np.c_[x, y][ii]
+    pts = pts[np.argsort(pts[:, 0])]
+
+    conic = conics.fit_conic_ransac(pts, weights=v, kind=kind, allow_rotation=allow_rotation,
+                                    max_iters=ransac_max_iters, tol=ransac_tol)
+
+    return conic, pts
 
 
-def _fill(pts1, pts2, *args, **kwargs):
-    x = np.r_[pts1[:, 0], pts2[:, 0][::-1]]
-    y = np.r_[pts1[:, 1], pts2[:, 1][::-1]]
-    plt.fill(x, y, *args, **kwargs)
+def _draw_group_trajs(trajs, aligner, scale, draw_conic: bool = False):
+    # ----
+    raster_size = 100, 100
+    raster_lw = 2
+    mode = 'img'
+    linewidth = 1
+    alpha_by_normalized_zscore = False
+    uniform_color = True
+    draw_stats = True
 
+    lms = 2 * scale
+    color = 'dodgerBlue' if uniform_color else None
+    # ----
 
-def draw_trajectories_grouped_by_embedded_dist(model_file):
-    """
-    group segments by their embedding distance, and draw trajectories of a random subset of
-    the groups.
-    """
-    # -----------------------
-    n_groups_to_draw = 8
-    n_segs_in_group = 10
-    near_thresh_p = 1
-    far_thresh_p = 99
-    seed = 1
-    # -----------------------
+    ref_traj = scale * np.c_[np.linspace(-1, 1, len(trajs[0])), np.linspace(-1, 1, len(trajs[0])) ** 2]
+    ref_traj -= ref_traj.mean()
 
-    aligners = [PlanarAligner('offset'), PlanarAligner('rigid'), PlanarAligner('affine')]
-    rng = np.random.default_rng(seed)
+    aligned_trajs = [aligner(ref_traj, traj)[0] for traj in trajs]
+    paths_raster, raster_scale, raster_offset = polytools.rasterize_paths(aligned_trajs, raster_size, width=raster_lw)
 
-    def _draw_group_trajs(seg_ixs, aligner):
-        # ----
-        linewidth = 1
-        alpha_by_normalized_zscore = False
-        uniform_color = True
-        # ----
+    if draw_conic:
+        conic, pts = fit_conic_to_traj_raster(paths_raster)
+        if mode != 'img':
+            pts = (pts - raster_offset) / raster_scale
+            conic = conic.get_transformed(offset=-raster_offset, sx=1/raster_scale[0], sy=1/raster_scale[1])
+    else:
+        conic = None
 
-        aligned_trajs = [aligner(parabola, trajs[ix])[0] for ix in seg_ixs]
-
+    if mode == 'img':
+        plt.imshow(paths_raster, cmap='gray')
+    else:
         if alpha_by_normalized_zscore:
             min_alpha, max_alpha = .2, .4
             mu = np.mean(aligned_trajs, axis=0)
@@ -58,64 +85,85 @@ def draw_trajectories_grouped_by_embedded_dist(model_file):
             dist_from_mu = (dist_from_mu - dist_from_mu.min()) / (dist_from_mu.max() - dist_from_mu.min())
             alpha = min_alpha + (1 - dist_from_mu) * (max_alpha - min_alpha)
         else:
-            alpha = np.ones(len(seg_ixs)) * .2
+            alpha = np.ones(len(trajs)) * .2
 
-        lms = 2 * traj_scale
-        color = 'dodgerBlue' if uniform_color else None
         for i, aligned_traj in enumerate(aligned_trajs):
             plt.plot(*aligned_traj.T, lw=linewidth, alpha=alpha[i], color=color)
             plt.xlim([-lms, lms])
             plt.ylim([-lms, lms])
             plt.gca().set_aspect('equal', adjustable='box')
 
+    if conic is not None:
+        plt.plot(*pts.T,'r.')
+        conic.draw(x=pts[:, 0], y=pts[:, 1], details=False, color='c')
+        plt.title(str(conic))
+
+
+def draw_trajectories_grouped_by_embedded_dist(model_file, shuff: bool = False):
+    """
+    group segments by their embedding distance, and draw trajectories of a random subset of
+    the groups.
+    """
+    # -----------------------
+    n_groups_to_draw = 5
+    n_segs_in_group = 50
+    n_raw_clusters = 1 / 50
+    seed = 1
+    # -----------------------
+
+    aligners = [PlanarAligner('offset'), PlanarAligner('rigid'), PlanarAligner('ortho')]
+    rnd = Rnd(seed)
+
     # --------
 
     model, cfg = cv_results_mgr.get_model_and_config(model_file)
-    data_mgr = DataMgr(cfg.data)
+    data_mgr = DataMgr(cfg.data, persist=True)
     trajs = data_mgr.get_pairing_trajectories()
     vecs, _ = data_mgr.get_inputs()
-    
+
     traj_scale = 2 * np.mean([np.std(traj, axis=0).mean() for traj in trajs])
 
-    # build shape to align trajectories to
-    seg_sz = len(trajs[0])
-    parabola = traj_scale * np.c_[np.linspace(-1, 1, seg_sz), np.linspace(-1, 1, seg_sz) ** 2]
-    parabola -= parabola.mean()
-    
     # normalized embedded distances
     embedded_vecs = dlutils.safe_predict(model, vecs)
-    embedded_dists = pdist(embedded_vecs)
-    near_thresh, far_thresh = np.percentile(embedded_dists, [near_thresh_p, far_thresh_p])
-    embedded_dists = squareform(embedded_dists)
 
-    # near/far in embedding space
-    is_near = embedded_dists < near_thresh
-    is_far = embedded_dists > far_thresh
+    # raw clusters:
+    n_clusters = int(len(embedded_vecs) * n_raw_clusters) if n_raw_clusters < 1 else n_raw_clusters
+    km = MiniBatchKMeans(n_clusters=n_clusters, n_init='auto', random_state=seed).fit(embedded_vecs)
+    labels = km.labels_
+    if shuff:
+        labels = Rnd(1).shuffle(labels)
+    valid_labels = [label for label, cluster_size in Counter(labels).items() if cluster_size > n_segs_in_group]
 
-    # chose segments to draw along with their near/far groups:
-    valids_segs = np.nonzero(np.minimum(np.sum(is_near, axis=1), np.sum(is_far, axis=1)) > n_segs_in_group)[0]
-    print("n valids:", len(valids_segs))
-    segs_to_draw = _get_random_subset(valids_segs, n_groups_to_draw, rng)
+    # decide which raw clusters to draw:
+    best_score = 0
+    groups_to_draw = None
+    for _ in range(10_000):
+        candidate_labels = rnd.subset(valid_labels, n_groups_to_draw)
+        score = np.median(pdist(km.cluster_centers_[candidate_labels]))
+        if score > best_score:
+            print(score)
+            groups_to_draw = candidate_labels
+            best_score = score
 
-    # near/far segments group for each chosen segment:
-    groups = {}
-    for seg_ix in segs_to_draw:
-        groups[seg_ix] = {
-            'near': _get_random_subset(np.nonzero(is_near[seg_ix])[0], n_segs_in_group, rng),
-            'far': _get_random_subset(np.nonzero(is_far[seg_ix])[0], n_segs_in_group, rng)
-        }
+    # decide which segments to draw within each cluster:
+    segment_groups = []
+    for label in groups_to_draw:
+        seg_ixs = np.nonzero(labels == label)[0]
+        dists_to_centroid = np.linalg.norm(embedded_vecs[seg_ixs] - embedded_vecs[seg_ixs].mean(axis=0), axis=1)
+        seg_ixs = seg_ixs[np.argsort(dists_to_centroid)[:n_segs_in_group]]
+        segment_groups.append(seg_ixs)
 
-    for group_type in ['near', 'far']:
-        _, axs = plt.subplots(ncols=n_groups_to_draw, nrows=len(aligners))
-        plt.suptitle(group_type)
-        for j, seg_ix in enumerate(segs_to_draw):
-            seg_ixs = groups[seg_ix][group_type]
-            for i, aligner in enumerate(aligners):
-                plt.sca(axs[i, j])
-                _draw_group_trajs(seg_ixs, aligner)
-                if j == 0: plt.ylabel(aligner.kind)
+    # draw:
+    _, axs = plt.subplots(ncols=len(groups_to_draw), nrows=len(aligners))
+    for j, seg_ixs in enumerate(segment_groups):
+        for i, aligner in enumerate(aligners):
+            plt.sca(axs[i, j])
+            _draw_group_trajs([trajs[i] for i in seg_ixs], aligner, traj_scale, draw_conic=aligner.kind=='ortho')
 
-    plt.show()
+    plotting.set_outter_labels(axs, y=[aligner.kind for aligner in aligners],
+                               t=[f'cluster{i+1}' for i in range(len(segment_groups))])
+
+    plt.suptitle(f"Shuff={shuff}")
 
 
 def draw_embedded_vs_metric_dists(model_file):
@@ -143,6 +191,7 @@ def draw_embedded_vs_metric_dists(model_file):
 
     vecs, _ = data_mgr.get_inputs()
     vecs = torch.as_tensor(vecs, dtype=torch.float32)
+    binned_plot_kws = {'n_bins': 10, 'kind': 'p', 'loc': 'med', 'color': 'limeGreen', 'band': 'error'}
 
     for embed in [False, True]:
         if embed:
@@ -151,7 +200,7 @@ def draw_embedded_vs_metric_dists(model_file):
             embedded_vecs = vecs
         embedded_vecs = embedded_vecs.detach().cpu().numpy()
         embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
-        plot_binned_stats(x=metric_dists, y=embedded_dists, n_bins=10, kind='p', stat='avg', err='se')
+        plotting.plot_binned_stats(x=metric_dists, y=embedded_dists, **binned_plot_kws)
         plt.title(f"Embed={embed}")
 
     embedded_vecs = model(vecs)
@@ -159,93 +208,16 @@ def draw_embedded_vs_metric_dists(model_file):
     for dff in ['df', 'rdf']:
         xx = arclen_diff if dff == 'df' else arclen_rdiff
         embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
-        plot_binned_stats(x=xx, y=embedded_dists, n_bins=10, kind='p', stat='avg', err='se')
+        plotting.plot_binned_stats(x=xx, y=embedded_dists, **binned_plot_kws)
         plt.title(dff)
 
-    plt.show()
 
-
-
-# ------ helpers
-
-import numpy as np
-import scipy.stats as stats
-
-
-def calc_stats(a):
-
-    n = len(a)
-    if not n:
-        a = np.zeros(1)
-
-    std = np.std(a)
-    med = np.median(a)
-    se = std / np.sqrt(max(1, n))
-
-    ret = {
-        'n': n,
-        'sum': np.sum(a),
-        'avg': np.mean(a),
-        'std': std,
-        'med': med,
-        'mad': 1.4826 * np.median(np.abs(a - med)),
-        'se': se,
-        'sm': 1.2533 * se
-    }
-
-    if not n:
-        ret = {k: np.nan if k != 'n' else 0 for k in ret}
-
-    return ret
-
-
-def calc_binned_stats(x, y, n_bins: int = 10, kind: str = 'u'):
-    """
-    Computes statistics for y within bins defined on x.
-    Parameters:
-    - x: Numeric vector.
-    - y: Numeric vector, same length as x.
-    - n_bins: Number of bins to split x into.
-    - kind: 'u' for uniform spacing, 'p' for uniform percentiles.
-    """
-
-    if kind == 'u':
-        x_bin_edges = np.linspace(np.min(x), np.max(x), n_bins + 1)
-    elif kind == 'p':
-        x_bin_edges = np.percentile(x, np.linspace(0, 100, n_bins + 1))
-    else:
-        raise ValueError("Unknown binning kind")
-
-    x_bin_edges[-1] += 1e-10
-    x_bin_inds = np.digitize(x, x_bin_edges) - 1
-    assert x_bin_inds.min() >= 0 and x_bin_inds.max() <= n_bins
-
-    stats_per_bin = [calc_stats(y[x_bin_inds == i]) for i in range(n_bins)]
-
-    stat_names = stats_per_bin[0].keys()
-    ret = {stat_name: np.array([ys[stat_name] for ys in stats_per_bin])
-           for stat_name in stat_names}
-
-    ret['x'] = (x_bin_edges[1:] + x_bin_edges[:-1]) / 2
-
-    return ret
-
-
-def plot_binned_stats(x, y, n_bins, kind, stat: str = 'avg', err: str = 'auto'):
-    stats = calc_binned_stats(x, y, n_bins, kind)
-    if err == 'auto':
-        assert stat in ('avg', 'med')
-        err = 'se' if stat == 'avg' else 'sm'
-    mu = stats[stat]
-    er = stats[err]
-    sns.set_style("darkgrid")
-    plt.figure(figsize=(10, 6))
-    plt.plot(stats['x'], mu, marker='o', linestyle='-', color='b', label=stat.capitalize())
-    plt.fill_between(stats['x'], mu - er, mu + er, color='blue', alpha=0.2, label=f'± {err.capitalize()}')
-    plt.legend()
 
 
 if __name__ == "__main__":
     file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
-    #draw_trajectories_grouped_by_embedded_dist(file)
-    draw_embedded_vs_metric_dists(file)
+    draw_trajectories_grouped_by_embedded_dist(file, shuff=False)
+    draw_trajectories_grouped_by_embedded_dist(file, shuff=True)
+    plt.show()
+
+

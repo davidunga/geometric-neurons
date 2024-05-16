@@ -7,15 +7,19 @@ from common.utils import symmetric_pairs
 from common.utils.devtools import verbolize
 from common.utils.typings import *
 from motorneural.data import Segment, postprocess_data_slices, Trial, validate_data_slices
+from common.utils import hashtools
 
 
 class DataMgr:
 
-    def __init__(self, cfg: DataConfig):
+    def __init__(self, cfg: DataConfig, persist: bool = False):
         self.cfg: DataConfig = cfg
+        self.persist = persist  # keep loaded segments in memory
+        self._segments: list[Segment] = []
 
-    def pkl_path(self, level: DataConfig.Level) -> Path:
-        return paths.DATA_DIR / (self.cfg.str(level) + f'.{level}.pkl')
+    def pkl_path(self, level: DataConfig.Level, mod: str = '') -> Path:
+        parts = [self.cfg.str(level), str(level), mod, 'pkl']
+        return paths.DATA_DIR / '.'.join([p for p in parts if p])
 
     @verbolize()
     def load_trials(self) -> tuple[list[Trial], dict]:
@@ -25,8 +29,11 @@ class DataMgr:
 
     @verbolize()
     def load_segments(self) -> list[Segment]:
+        if self._segments: return self._segments
         segments = pickle.load(self.pkl_path(DataConfig.SEGMENTS))
         validate_data_slices(segments, same_len=True)
+        if self.persist:
+            self._segments = segments
         return segments
 
     @verbolize()
@@ -98,15 +105,51 @@ class DataMgr:
             return x[:, :2] if x.ndim >= 2 else np.c_[np.linspace(0, 1, len(x)), x]
         return [_to_2d(s[pairing_variable]) for s in segments]
 
+    # def get_inputs_meta(self) -> dict[str, list[str]]:
+    #     _, column_names = self.get_inputs()
+    #     column_neurons = [c.split('.')[0] for c in column_names]
+    #     neuron_names = sorted(set(column_neurons))
+    #     return {'column_names': column_names,
+    #             'column_neurons': column_neurons,
+    #             'neuron_names': neuron_names}
+
     @verbolize()
-    def get_inputs(self, segments: list[Segment] = None) -> tuple[NDArray, list[str]]:
+    def get_inputs(self):
         """
             return inputs matrix and columns names, such that
             i-th row = processed (reduced and flattened) activations of i-th segment.
             column names = '<neuron_name>.<time_bin>'
         """
+        hash_size = 6
+        inputs_hash = hashtools.calc_hash(self.cfg.inputs.__dict__, fmt='hex')[:hash_size]
+        pkl = self.pkl_path(DataConfig.SEGMENTS, f'inputs{inputs_hash}')
+        if not pkl.is_file():
+            inputs, input_full_names = self._make_inputs()
+            pickle.dump([inputs, input_full_names], pkl)
+        inputs, input_full_names = pickle.load(pkl)
 
-        segments = segments if segments else self.load_segments()
+        input_neuron_names = [c.split('.')[0] for c in input_full_names]
+        neuron_names = sorted(set(input_neuron_names))
+
+        n_units = len(neuron_names)
+        n_bins_in_segment = int(round(self.cfg.segments.dur / self.cfg.inputs.bin_sz))
+        verbolize.inform(f"Segment's input vector size: "
+                         f"({n_units} {self.cfg.inputs.variable} units) x ({n_bins_in_segment} bins)"
+                         f" = {inputs.shape[1]} flat bins.")
+
+        meta = {'input_full_names': input_full_names,
+                'input_neuron_names': input_neuron_names}
+
+        return inputs, meta
+
+    def _make_inputs(self) -> tuple[NDArray, list[str]]:
+        """
+            make inputs matrix and columns names, such that
+            i-th row = processed (reduced and flattened) activations of i-th segment.
+            column names = '<neuron_name>.<time_bin>'
+        """
+
+        segments = self.load_segments()
         inputs, _ = postprocess_data_slices(
             data_slices=segments, variable=self.cfg.inputs.variable,
             new_bin_sz=self.cfg.inputs.bin_sz, inplace=False,
@@ -126,11 +169,20 @@ class DataMgr:
         inputs = inputs[:, si]
         colnames = [colnames[i] for i in si]
 
-        verbolize.inform(f"Segment's input vector size: "
-                         f"({n_units} {self.cfg.inputs.variable} units) x ({n_bins_in_segment} bins)"
-                         f" = {inputs.shape[1]} flat bins.")
-
         return inputs, colnames
+
+    @verbolize()
+    def get_reduced_kinematics(self, segments: list[Segment] = None, reduce: str = 'median',
+                               names: list[str] = None) -> dict[str, np.ndarray[float]]:
+
+        segments = segments if segments else self.load_segments()
+        reduce_func = getattr(np, reduce)
+        names = segments[0].kin.columns if names is None else names
+        m = np.zeros((len(segments), len(names)), float)
+        for i, s in enumerate(segments):
+            m[i] = reduce_func(s.kin[names], axis=0)
+        ret = {name: m[:, j] for j, name in enumerate(names)}
+        return ret
 
 
 def convert_segment_uid_to_num_inplace(df: pd.DataFrame, uids: list[str]) -> None:

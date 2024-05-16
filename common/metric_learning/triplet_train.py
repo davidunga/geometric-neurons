@@ -11,6 +11,9 @@ from common.utils import dlutils
 from common.utils import tbtools
 from common.utils.devtools import progbar
 from common.utils.typings import *
+from itertools import product
+import wandb
+import auth
 
 
 def triplet_train(
@@ -27,10 +30,10 @@ def triplet_train(
         loss_margin: float = 1.,
         device: str = 'cpu',
         model_file: Path = None,
-        tensorboard_dir: Path = None,
         progress_mgr_params: dict = None,
         checkpoint_every: int = 5,
         exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "error",
+        wandb_run: wandb.sdk.wandb_run.Run = None,
         base_meta: dict = None,
         dbg_run: bool = False
 ):
@@ -46,16 +49,30 @@ def triplet_train(
 
     # ------
 
-    def _add_to_tensborboard(eval_results: dict[str, EmbeddingEvalResult], epoch: int,
-                             hists: dict[str, Sequence[int]] = None):
-        if tb is None:
+    def _add_to_wandb(train_eval: EmbeddingEvalResult, val_eval: EmbeddingEvalResult,
+                      epoch: int, hists: dict = None):
+
+        if wandb_run is None:
             return
-        if hists:
-            for tag, counts in hists.items():
-                tbtools.add_counts_as_histogram(tb, counts, tag, epoch)
-        for metric in ('loss', 'auc', 'tscore'):
-            tb.add_scalars(metric.capitalize(), {name: getattr(eval_res, metric)
-                                                 for name, eval_res in eval_results.items()}, epoch)
+
+        _metrics_to_log = ('loss', 'auc', 'tscore')
+
+        items = {}
+
+        if train_eval is not None:
+            items.update({f'train_{metric}': getattr(train_eval, metric) for metric in _metrics_to_log})
+
+        if val_eval is not None:
+            items.update({f'val_{metric}': getattr(val_eval, metric) for metric in _metrics_to_log})
+
+        if hists is not None:
+            for hist_name, hist in hists.items():
+                if not isinstance(hist, tuple):
+                    bin_edges = np.arange(len(hist) + 1)
+                    hist = (hist, bin_edges)
+                items[hist_name] = wandb.Histogram(np_histogram=hist)
+
+        wandb_run.log(data=items, step=epoch)
 
     def _save_snapshot(kind: str, epoch_: int):
         """
@@ -124,11 +141,6 @@ def triplet_train(
     if not model_file.parent.is_dir():
         model_file.parent.mkdir(parents=True)
 
-    if tensorboard_dir is not None:
-        if tensorboard_dir.is_dir() and not warm_start:
-            shutil.rmtree(tensorboard_dir.as_posix())
-        tensorboard_dir.mkdir(parents=True, exist_ok=True)
-
     inputs = torch.as_tensor(inputs, device=device, dtype=torch.float32)
     model.to(device=device, dtype=torch.float32)
     model.train()
@@ -159,12 +171,14 @@ def triplet_train(
     else:
         progress_mgr = dlutils.ProgressManager(patience=None, epochs=epochs)
 
-    tb = None if tensorboard_dir is None else SummaryWriter(log_dir=str(tensorboard_dir))
+    items_for_hist = train_sampler.included_items
+    if wandb is not None and len(items_for_hist) > wandb.Histogram.MAX_LENGTH:
+        items_for_hist = [items_for_hist[int(round(i))]
+                          for i in np.linspace(0, len(items_for_hist) - 1, wandb.Histogram.MAX_LENGTH)]
 
     if not warm_start:
-        _add_to_tensborboard(dict(train=train_eval, val=val_eval),
-                             epoch=-1,
-                             hists={'sample_counts': np.zeros(train_sampler.n_total_items, int)})
+        _add_to_wandb(train_eval=train_eval, val_eval=val_eval, epoch=-1,
+                      hists={'sample_counts': np.zeros(len(items_for_hist), int)})
         snapshot_mgr.wipe()
         _save_snapshot('init', epoch_=-1)
 
@@ -219,7 +233,8 @@ def triplet_train(
         val_eval = val_evaluator.evaluate(embedder=model, inputs=inputs)
 
         print(f' ({time() - epoch_start_t:2.1f}s) Train: {train_eval} Val: {val_eval}', end='')
-        _add_to_tensborboard(dict(train=train_eval, val=val_eval), epoch=epoch, hists={'sample_counts': sample_counts})
+        _add_to_wandb(train_eval=train_eval, val_eval=val_eval, epoch=epoch,
+                      hists={'sample_counts': sample_counts[items_for_hist]})
 
         progress_mgr.process(val_eval.loss, train_eval.loss, val_eval.auc, epoch=epoch)
         print(' ' + progress_mgr.report(), end='')
@@ -245,7 +260,3 @@ def triplet_train(
         if progress_mgr.should_stop:
             print("Stopping due to " + progress_mgr.stop_reason)
             break
-
-
-
-

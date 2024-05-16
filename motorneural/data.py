@@ -7,6 +7,7 @@ from common.utils.devtools import verbolize
 from . motor import KinData
 from . neural import NeuralData
 from . typetools import *
+from scipy.ndimage.filters import gaussian_filter1d
 
 
 @dataclass
@@ -78,11 +79,36 @@ class DataSlice:
         return {**self.kin.events, **self.neural.events, **self.neural_pc.events}
 
     def __getitem__(self, item: str):
+
+        tform_funcs = {'lg': lambda x: np.log(x - np.min(x) + 1e-8),
+                       'ab': lambda x: np.abs(x)}
+
+        if '-' in item:
+            tforms, item = item.split('-')
+            tforms = [tforms[2 * k: 2 * k + 2].lower() for k in range(len(tforms) // 2)][::-1]
+        else:
+            tforms = []
+
         if '.' in item:
             attr, field = item.split('.')
             ret = getattr(self, attr)[field]
         else:
-            ret = getattr(self, item)
+            try:
+                ret = getattr(self, item)
+            except AttributeError:
+                ret = None
+                if item in self.kin.extended_columns:
+                    ret = self.kin[item]
+                if item in self.neural.extended_columns:
+                    if ret is not None:
+                        raise AttributeError("Cannot determine attribute: appears in both kin & neural")
+                    ret = self.neural[item]
+                if ret is None:
+                    raise
+
+        for tform in tforms:
+            ret = tform_funcs[tform](ret)
+
         return ret
 
     def _validate(self):
@@ -94,6 +120,12 @@ class DataSlice:
             _assert_close(self.kin, self.neural_pc)
         lags = self.kin.t - self.neural.t
         assert np.max(np.abs(self._lag - lags)) < 1e-3 * self._lag
+
+    def get_processed(self, attr: str, smooth_dur: float):
+        v = self[attr]
+        if smooth_dur:
+            v = gaussian_filter1d(v, sigma=smooth_dur / self.bin_size, axis=-1, mode='mirror')
+        return v
 
 
 class Trial(DataSlice):

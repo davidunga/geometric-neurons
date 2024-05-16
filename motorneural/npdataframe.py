@@ -4,7 +4,7 @@ import numpy as np
 import numpy.typing
 import pandas as pd
 
-from common.utils.sigproc import reduce_rows
+from common.utils.sigproc import nonoverlap_reduce
 
 
 class NpDataFrame:
@@ -77,7 +77,7 @@ class NpDataFrame:
             assert factor is None
             factor = bin_sz / self.bin_size
         win_sz = int(round(factor))
-        values, sampled_ixs = reduce_rows(self[:], win_sz)
+        values, sampled_ixs = nonoverlap_reduce(self[:], win_sz, axis=0, reduce='mean')
         new_len = len(self) // win_sz
         assert len(values) == new_len
         t = None if self._t is None else self._t[sampled_ixs]
@@ -88,6 +88,10 @@ class NpDataFrame:
     @property
     def columns(self):
         return self._df.columns
+
+    @property
+    def extended_columns(self) -> list[str]:
+        return list(self.columns) + list(self._aliases)
 
     @property
     def shape(self) -> tuple[int, int]:

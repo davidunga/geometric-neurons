@@ -59,6 +59,7 @@ from copy import deepcopy
 
 # -----------------------
 
+
 HATSO_DATASET_SPECS = {
     "TP_RS": {
         "file": "rs1050211_clean_spikes_SNRgt4.mat",
@@ -102,6 +103,7 @@ HATSO_DATASET_SPECS = {
 HATSO_DATASET_SPECS["TP_RJ_PMD"] = deepcopy(HATSO_DATASET_SPECS["TP_RJ"])
 HATSO_DATASET_SPECS["TP_RJ_PMD"].update({"brain_sites": ["pmd"], "total_neurons": 50})
 
+_NUM_TARGETS_IN_RTP_TRIAL = 7
 
 def get_hatso_datasets(**kwargs):
     filters = {k: [v] if isinstance(v, (str, int, float)) else v for k, v in kwargs.items()}
@@ -215,16 +217,22 @@ def construct_hatso_trials(
     # core:
 
     raw_ = loadmat(file)
+    task = 'CO' if 'cpl_0deg' in raw_ else 'TP'
 
     # full kinematics (x,y,t):
     X = np.stack([raw_['x'][:, 1], raw_['y'][:, 1]], axis=1)
     t = .5 * (raw_['x'][:, 0] + raw_['y'][:, 0])
 
+    if task == 'TP':
+        target_hit_tms = np.real(raw_['targetX' if 'targetX' in raw_ else 'hit_target']).flatten()
+    else:
+        target_hit_tms = None
+
     # full neural:
     population_spktimes, neuron_info = _get_neural_spiketimes_and_info(raw_)
 
     # get events and properties per trial:
-    events_tms, properties = (_get_CO_events_and_properies(raw_) if 'cpl_0deg' in raw_ else
+    events_tms, properties = (_get_CO_events_and_properies(raw_) if task == 'CO' else
                               _get_TP_events_and_properies(raw_))
 
     print(f"Constructing trials with bin_size={bin_sz:2.3f}, lag={lag:2.3f}, "
@@ -260,6 +268,19 @@ def construct_hatso_trials(
                           for event_name, event_time in tr_event_tms.items()}
         kin_event_bins['maxSpd'] = int(np.argmax(kin['EuSpd']))
         kin_event_bins['maxAcc'] = int(np.argmax(kin['EuAcc']))
+
+        if task == 'TP':
+            # add target hit events
+            hits_st, hits_end = np.searchsorted(target_hit_tms, [tr_event_tms["st"], tr_event_tms["end"]])
+            hit_tms = target_hit_tms[hits_st: hits_end + 1]
+            if len(hit_tms) > _NUM_TARGETS_IN_RTP_TRIAL:
+                assert hit_tms[-1] > tr_event_tms["end"]
+                hit_tms = hit_tms[:-1]
+            assert len(hit_tms) == _NUM_TARGETS_IN_RTP_TRIAL, len(hit_tms)
+            hit_tms[0] = kin_t[0]
+            hit_tms[-1] = kin_t[-1]
+            kin_event_bins.update({f'hit.{i+1}': kin.time2index(hit_tm) for i, hit_tm in enumerate(hit_tms)})
+
         assert kin_event_bins['st'] == 0
         assert kin_event_bins['end'] == len(kin) - 1
         assert max(kin_event_bins.values()) <= kin_event_bins['end']

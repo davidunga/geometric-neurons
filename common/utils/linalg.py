@@ -3,7 +3,26 @@ import numpy as np
 from common.utils.typings import *
 
 
+def rotate(x: np.ndarray | float, y: np.ndarray | float, rad: float = None, deg: float = None, ax=None):
+    if deg is not None:
+        assert rad is None
+        rad = deg * np.pi / 180
+    if ax is not None:
+        x, y = x - ax[0], y - ax[1]
+    c, s = np.cos(rad), np.sin(rad)
+    x, y = c * x - s * y, s * x + c * y
+    if ax is not None:
+        x += ax[0]
+        y += ax[1]
+    return x, y
+
+
 class planar:
+
+    @staticmethod
+    def transform(pts: np.ndarray, scale: float = 1., ang: float = .0, offset=.0, reflect: str = 'none'):
+        A = planar.build(b=scale, ang=ang, t=offset, reflect=reflect)
+        return planar.apply(A, pts)
 
     @staticmethod
     def _check_mtx(A):

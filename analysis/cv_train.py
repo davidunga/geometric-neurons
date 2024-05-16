@@ -1,7 +1,9 @@
+import datetime
+
 import numpy as np
 import pandas as pd
 import torch.nn
-from analysis.pairs_dataframe import pairs_to_matrix
+from analysis.costume_dataframes import pairs_df_funcs
 import paths
 from analysis.config import Config
 from analysis.data_manager import DataMgr
@@ -14,6 +16,9 @@ from common.utils.typings import *
 import cv_results_mgr
 from common.metric_learning.embedding_models import LinearEmbedder
 from typing import Literal
+import wandb
+import auth
+from datetime import datetime
 
 
 class TrainingMgr:
@@ -24,6 +29,7 @@ class TrainingMgr:
                  dbg_run: bool = False,
                  early_stop_epoch: int = None,
                  exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
+                 group: int | str = None,
                  **kwargs):
 
         self.cfg = cfg if isinstance(cfg, Config) else Config(cfg)
@@ -32,6 +38,7 @@ class TrainingMgr:
         self.dbg_run = dbg_run
         self.early_stop_epoch = early_stop_epoch
         self.exists_handling = exists_handling
+        self.group = f"{group:04d}" if isinstance(group, int) else group
         self._kwargs = kwargs
 
     def as_dict(self) -> dict:
@@ -91,8 +98,8 @@ class TrainingMgr:
     def dispatch(self) -> bool:
 
         def _make_sampler(pairs_df: pd.DataFrame, **kwargs) -> TripletSampler:
-            sameness_mtx = pairs_to_matrix(pairs_df, 'isSame', map_zero_value=-1, dtype=int)
-            dist_mtx = pairs_to_matrix(pairs_df, 'dist')
+            sameness_mtx = pairs_df_funcs.to_sparse_matrix(pairs_df, 'isSame', map_zero_value=-1, dtype=int)
+            dist_mtx = pairs_df_funcs.to_sparse_matrix(pairs_df, 'dist')
             return TripletSampler(sameness_mtx=sameness_mtx, dist_mtx=dist_mtx, **kwargs)
 
         model_file = self.model_file
@@ -129,13 +136,23 @@ class TrainingMgr:
         inputs, _ = self.data_mgr.get_inputs()
         model = self.init_model(input_size=inputs.shape[1])
 
+        wandb.login(key=auth.get_key('wandb'), relogin=False, force=False)
+        wandb_run = wandb.init(
+            project="geometric-neurons",
+            config=self.as_dict(),
+            name=self.cfg.short_output_name,
+            group=self.group,
+            dir=paths.WANDB_ROOT,
+            id=self.cfg.output_name + " " + datetime.strftime(datetime.now(), "%Y%m%d%H%M%S"),
+        )
+
         triplet_train(train_sampler=train_sampler,
                       val_sampler=val_sampler,
                       inputs=inputs,
                       model=model,
                       model_file=model_file,
-                      tensorboard_dir=tensorboard_dir,
                       **self.training_kws,
+                      wandb_run=wandb_run,
                       base_meta=self.as_dict(),
                       dbg_run=self.dbg_run,
                       exists_handling=self.exists_handling)
@@ -145,6 +162,7 @@ class TrainingMgr:
 
 def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
            dbg_run: bool = False,
+           group: int | str = None,
            early_stop_epoch: int = None,
            cfg_name_include: str = None,
            cfg_name_exclude: str = None):
@@ -170,7 +188,7 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
             print(grid_cfgs_df.loc[cfg_ix].to_string())
 
             training_mgr = TrainingMgr(cfg, fold=fold, dbg_run=dbg_run, early_stop_epoch=early_stop_epoch,
-                                       exists_handling=exists_handling)
+                                       exists_handling=exists_handling, group=group)
             success = training_mgr.dispatch()
             if success:
                 cv_results_mgr.refresh_results_file()
@@ -178,4 +196,4 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
 
 if __name__ == "__main__":
     cv_results_mgr.refresh_results_file()
-    #run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=20)
+    run_cv(exists_handling="overwrite", dbg_run=False, early_stop_epoch=20)

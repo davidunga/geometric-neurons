@@ -1,6 +1,6 @@
 data:
     trials:
-      name: TP_RS
+      name: [TP_RS, TP_RJ]
       bin_sz: .01
       lag: .1
     segments:
@@ -8,8 +8,8 @@ data:
       radcurv_bounds: [[.2, 5]]
     pairing:
       variable: kin.X
-      align_kind: [affine]
-      dist_metric: [nmahal]
+      align_kind: [affine, ortho]
+      dist_metric: [nmahal, nfrob]
       same_pctl: .05
       notSame_pctl: .2
       exclude_pctl: .8

@@ -56,6 +56,14 @@ class Config:
         hash_size = 6
         return self.data.str(DataConfig.OUTPUT) + " " + hashtools.calc_hash(self.__dict__, fmt='hex')[:hash_size]
 
+    @property
+    def short_output_name(self) -> str:
+        monkey = self.data.trials.name.split('_')[1]
+        align = self.data.pairing.align_kind[:3]
+        dist = self.data.pairing.dist_metric[:3]
+        hash_ = hashtools.calc_hash(self.__dict__, fmt='hex')[:6]
+        return f"{monkey} {align} {dist} {hash_}"
+
     def get_as_eval_config(self):
         return _get_modified_config(self, _config_mods_for_eval)
 
@@ -67,10 +75,15 @@ class DataConfig(Munch):
     SEGMENTS = Level("segments")
     PAIRING = Level("pairing")
     OUTPUT = Level("output")
+    LEVELS_ORDER = [TRIALS, SEGMENTS, PAIRING, OUTPUT]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert DataConfig.TRIALS in self
+
+    @classmethod
+    def from_dict(cls, cfg):
+        return cls(munchify(dictools.inherit_values(cfg)))
 
     def str(self, level: Level = None):
         if level is None:

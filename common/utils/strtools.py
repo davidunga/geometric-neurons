@@ -1,11 +1,18 @@
 import numpy as np
 
 
-def attribs_string(obj) -> str:
+def to_str(x, f='2.3'):
+    if isinstance(x, float):
+        return f"{x:{f + 'f'}}"
+    else:
+        return str(x)
+
+
+def attribs_string(obj, f='2.3', dl='\n') -> str:
     if hasattr(obj, '__dict__'):
         obj = obj.__dict__
-    s = [f"{k}: {v}" for k, v in obj.items()]
-    s = "\n".join(s)
+    s = [f"{k}: {to_str(v, f=f)}" for k, v in obj.items()]
+    s = dl.join(s)
     return s
 
 

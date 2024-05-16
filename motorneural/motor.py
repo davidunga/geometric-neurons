@@ -2,6 +2,7 @@
 Motor and kinematic data processing + containers
 """
 import geometrik as gk
+import numpy as np
 import pandas as pd
 from scipy.ndimage.filters import gaussian_filter1d
 from . npdataframe import NpDataFrame
@@ -36,6 +37,16 @@ class KinData(NpDataFrame):
     @property
     def num_vars(self):
         return self.shape[1]
+
+    @property
+    def ang(self) -> float:
+        dx = self['PosX'][-1] - self['PosX'][0]
+        dy = self['PosY'][-1] - self['PosY'][0]
+        return float(np.degrees(np.arctan2(dy, dx)))
+
+    @property
+    def arclen(self) -> float:
+        return self['EuArc'][-1] - self['EuArc'][0]
 
     def __str__(self):
         return f"KinData: {self.num_vars} variables, {len(self)} bins"
@@ -78,6 +89,7 @@ class KinData(NpDataFrame):
 #         return str(self)
 
 # ----------------------------------
+
 
 def cart2polar(xy):
     rho = np.linalg.norm(xy, axis=1)
@@ -141,23 +153,27 @@ def kinematics(X: NpPoints, t: NpVec, dst_t: NpVec, dx: float = None, smooth_dur
     t = dst_t
     PosX, PosY = crv.pos(t).T
     spd, spd_ang = cart2polar(crv.vel(t))
-    spd, spd_ang = cart2polar(crv.vel(t))
     acc, acc_ang = cart2polar(crv.acc(t))
 
     kin = {
-           'PosX': PosX,
-           'PosY': PosY,
+        'PosX': PosX,
+        'PosY': PosY,
 
-           'EuSpdAng': np.degrees(spd_ang) % 360,
-           'EuAcc': acc,
-           'EuAccAng': np.degrees(acc_ang) % 360,
+        'EuSpdAng': np.degrees(spd_ang) % 360,
+        'EuAccAng': np.degrees(acc_ang) % 360,
+        'EuAcc': acc,
 
-           'AfSpd': numdrv(invars['s0'], t)[0],
-           'SaSpd': numdrv(invars['s1'], t)[0],
-           'EuSpd': spd,
+        'AfArc': invars['s0'],
+        'SaArc': invars['s1'],
+        'EuArc': invars['s2'],
 
-           'AfCrv': np.abs(invars['k0']),
-           'SaCrv': np.abs(invars['k1']),
-           'EuCrv': np.abs(invars['k2'])}
+        'AfSpd': numdrv(invars['s0'], t)[0],
+        'SaSpd': numdrv(invars['s1'], t)[0],
+        'EuSpd': spd,
+
+        'AfCrv': invars['k0'],
+        'SaCrv': invars['k1'],
+        'EuCrv': invars['k2']
+    }
 
     return KinData.from_dict(kin, t)

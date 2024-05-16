@@ -11,3 +11,5 @@ MODELS_DIR = _output_root / "models"
 DATA_DIR = _resources_root / "data"
 TENSORBOARD_DIR = Path("~/tensorboard").expanduser() / _project_name
 GLOBAL_DATA_DIR = Path("~/data").expanduser()
+KEYS_DIR = Path('~/keys').expanduser()
+WANDB_ROOT = _output_root

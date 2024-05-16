@@ -14,12 +14,19 @@ def normalized_mahalanobis(X, Y) -> float:
     return dists.mean() / 2
 
 
+def normalized_frobenius(X, Y):
+    scale = np.linalg.norm(X, 'fro') + np.linalg.norm(Y, 'fro')
+    dist = 2 * np.linalg.norm(X - Y, 'fro') / scale
+    return dist
+
+
 def absolute_average(X, Y) -> float:
     return float(np.abs(np.mean(X - Y)))
 
 
 _func_names = {
     normalized_mahalanobis: ['normalized_mahalanobis', 'nmahal'],
+    normalized_frobenius: ['normalized_frobenius', 'nfrob'],
     absolute_average: ['absolute_average', 'absavg']
 }
 

@@ -3,7 +3,7 @@ import numpy as np
 
 from config import Config
 from data_manager import DataMgr
-from common.motorneural import draw_data
+from motorneural import draw_data
 
 
 def adjust_legend(ax=None, orient: str = 'auto', loc: str = 'best'):
@@ -19,7 +19,6 @@ def adjust_legend(ax=None, orient: str = 'auto', loc: str = 'best'):
         kws['ncol'] = len(labels) if orient == 'h' else 1
 
     ax.legend(**kws)
-    print(".")
 
 
 if __name__ == "__main__":
@@ -29,7 +28,6 @@ if __name__ == "__main__":
     data_mgr = DataMgr(cfg.data)
     trials, meta = data_mgr.load_trials()
     print(meta)
-
     for trial_ix in np.round(np.linspace(0, len(trials) - 1, 10)).astype(int):
-        draw_data.draw_neural_rates(trials[trial_ix].get_binned(factor=1.5))
-    plt.show()
+        draw_data.draw_kin_events(trials[trial_ix], traj=True)
+        plt.show()

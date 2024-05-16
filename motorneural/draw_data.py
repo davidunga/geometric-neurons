@@ -140,3 +140,23 @@ def plot_trajectories(data: list[Trial], group_by=None, event_markers=None):
         plt.title(f"Trajectories" + (f" by {group_by}" if group_by is not None else ""))
 
     plt.legend([plt.Line2D([0], [0], color="k", marker=marker) for marker in lgd.values()], list(lgd.keys()))
+
+
+def draw_kin_events(data_slice: DataSlice, ax=None, palette: dict = None, traj: bool = False):
+
+    if ax is None:
+        ax = plt.gca()
+
+    if not palette:
+        palette = {'hit': 'rX'}
+
+    if traj:
+        ax.plot(*data_slice['X'].T, 'k')
+
+    for event, ind in data_slice.kin.events.items():
+        event_type = event.split('.')[0]
+        if event_type in palette:
+            xy = data_slice['X'][ind]
+            ax.plot(*xy, palette[event_type])
+            ax.annotate(event, xy)
+

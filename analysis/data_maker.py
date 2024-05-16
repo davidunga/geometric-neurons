@@ -15,34 +15,45 @@ from common.utils.planar_align import PlanarAligner
 from common.utils.typings import *
 from motorneural.data import Segment, Trial, validate_data_slices
 from motorneural.datasets.hatsopoulos import make_hatso_data, HATSO_DATASET_SPECS
+from common.utils import dictools
 
 
-def make_and_save(cfg: DataConfig, force: int = 0, upto: DataConfig.Level = None) -> None:
+def make_and_save(cfg: DataConfig, upto: DataConfig.Level = DataConfig.PAIRING,
+                  force: str = 'no') -> None:
+
+    assert force in ('no', 'all', 'upto')
 
     data_mgr = DataMgr(cfg)
+    trials, segments, pairs = None, None, None
 
-    trials_pkl = data_mgr.pkl_path(DataConfig.TRIALS)
-    if force > 2 or not trials_pkl.exists():
-        trials, meta = make_trials_data(dataset=cfg.trials.name, lag=cfg.trials.lag, bin_sz=cfg.trials.bin_sz)
-        pickle.dump([trials, meta], trials_pkl)
-    trials, meta = data_mgr.load_trials()
-    if upto == DataConfig.TRIALS:
-        return
+    for level in [DataConfig.TRIALS, DataConfig.SEGMENTS, DataConfig.PAIRING]:
+        pkl = data_mgr.pkl_path(level)
+        is_forced = force == 'all' or (level == upto and force == 'upto')
+        if pkl.exists() and not is_forced:
+            continue
 
-    segments_pkl = data_mgr.pkl_path(DataConfig.SEGMENTS)
-    if force > 1 or not segments_pkl.exists():
-        segments = extract_segments(trials=trials, dur=cfg.segments.dur, radcurv_bounds=cfg.segments.radcurv_bounds)
-        pickle.dump(segments, segments_pkl)
-    segments = data_mgr.load_segments()
-    if upto == DataConfig.SEGMENTS:
-        return
+        if level == DataConfig.TRIALS:
+            trials, meta = make_trials_data(dataset=cfg.trials.name, lag=cfg.trials.lag,
+                                            bin_sz=cfg.trials.bin_sz)
+            pickle.dump([trials, meta], pkl)
+            trials, meta = data_mgr.load_trials()
 
-    pairing_pkl = data_mgr.pkl_path(DataConfig.PAIRING)
-    if force > 0 or not pairing_pkl.exists():
-        pairing = calc_pairing(segments=segments, variable=cfg.pairing.variable,
-                               align_kind=cfg.pairing.align_kind, n_workers=8)
-        pickle.store(pairing, str(pairing_pkl))
-    pairing = data_mgr.load_pairing()
+        elif level == DataConfig.SEGMENTS:
+            trials = data_mgr.load_trials()[0] if trials is None else trials
+            segments = extract_segments(trials=trials, dur=cfg.segments.dur,
+                                        radcurv_bounds=cfg.segments.radcurv_bounds)
+            pickle.dump(segments, pkl)
+            segments = data_mgr.load_segments()
+
+        elif level == DataConfig.PAIRING:
+            segments = data_mgr.load_segments() if segments is None else segments
+            pairing = calc_pairing(segments=segments, variable=cfg.pairing.variable,
+                                   align_kind=cfg.pairing.align_kind, n_workers=8)
+            pickle.store(pairing, str(pkl))
+            pairing = data_mgr.load_pairing()
+
+        if level == upto:
+            break
 
     return
 
@@ -150,7 +161,7 @@ class PairingCalcWorker:
         self.name = name
         self.report_every = report_every
         self.dump_every = dump_every
-        self.metrics = ['nmahal', 'absavg']
+        self.metrics = ['nmahal', 'nfrob', 'absavg']
 
     def __call__(self, start_ix: int = 0, stop_ix: int = None):
 
@@ -305,21 +316,29 @@ def calc_pairing(segments: list[Segment],
 
 
 def run__make_and_save():
-    force = 0
-    datasets = ['TP_RS', 'TP_RJ']
-    datasets = datasets[1:]
-    #datasets = get_hatso_datasets(task='TP')
-    upto = None # DataConfig.TRIALS
-    bin_sizes = [None]
-    for align_kind in ['affine', 'ortho']:
-        for bin_sz in bin_sizes:
-            for dataset in datasets:
-                data_cfg = Config.from_default().data
-                data_cfg.trials.name = dataset
-                if bin_sz is not None:
-                    data_cfg.trials.bin_sz = bin_sz
-                data_cfg.pairing.align_kind = align_kind
-                make_and_save(data_cfg, force=force, upto=upto)
+
+    grid = {
+        'trials': {'name': ['TP_RS', 'TP_RJ']},
+        'segments': {'dur': .2},
+        'pairing': {'dist_metric': ['nfrob'], 'align_kind': ['ortho', 'affine']}
+    }
+
+    base_data_cfg = Config.from_default().data
+    levels = [DataConfig.TRIALS, DataConfig.SEGMENTS, DataConfig.PAIRING]
+
+    count = 0
+    for i, level in enumerate(levels):
+        subgrid = {k: v for k, v in grid.items() if k in levels[:(i + 1)]}
+        for data_cfg_ in dictools.dict_product_from_grid(subgrid, base_dict=base_data_cfg.__dict__):
+            make_and_save(DataConfig.from_dict(data_cfg_), upto=level, force='all')
+        if level in grid:
+            count += 1
+            if count == len(grid):
+                # no grid params from this level onwards
+                break
+
+
+
 
 
 if __name__ == "__main__":

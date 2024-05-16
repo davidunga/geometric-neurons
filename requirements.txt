@@ -10,6 +10,7 @@ certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_170702213979
 cffi @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_ab19r4bji3/croot/cffi_1670423206034/work
 chardet==5.2.0
 charset-normalizer @ file:///tmp/build/80754af9/charset-normalizer_1630003229654/work
+click==8.1.7
 comm @ file:///home/conda/feedstock_root/build_artifacts/comm_1704278392174/work
 contourpy @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_97c8ctlp86/croots/recipe/contourpy_1663827422071/work
 cryptography @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_905z2r5rpq/croot/cryptography_1694211573866/work
@@ -17,12 +18,15 @@ cycler @ file:///tmp/build/80754af9/cycler_1637851556182/work
 Cython==3.0.7
 debugpy @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_563_nwtkoc/croot/debugpy_1690905063850/work
 decorator @ file:///home/conda/feedstock_root/build_artifacts/decorator_1641555617451/work
+docker-pycreds==0.4.0
 docutils==0.20.1
 exceptiongroup==1.1.3
 executing @ file:///home/conda/feedstock_root/build_artifacts/executing_1698579936712/work
 filelock @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_20tv0lrp8x/croot/filelock_1672387134240/work
 fonttools==4.25.0
-geometrik @ file:///Users/davidu/geometrik
+geometrik @ git+https://github.com/davidunga/geometrik.git@03070e3d54305860e35006fff949bf28787834fc
+gitdb==4.0.11
+GitPython==3.1.43
 gmpy2 @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/croot-muov7gw1/gmpy2_1645462616268/work
 google-auth==2.23.2
 google-auth-oauthlib==1.0.0
@@ -85,8 +89,11 @@ scikit-learn==1.3.1
 scipy==1.11.2
 screeninfo==0.8.1
 seaborn==0.13.0
+sentry-sdk==2.1.1
+setproctitle==1.3.3
 six @ file:///tmp/build/80754af9/six_1644875935023/work
 sklearn==0.0.post9
+smmap==5.0.1
 snowballstemmer==2.2.0
 Sphinx==7.2.5
 sphinxcontrib-applehelp==1.0.7
@@ -110,6 +117,8 @@ traitlets @ file:///home/conda/feedstock_root/build_artifacts/traitlets_17042129
 typing_extensions @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_1fdywrbp_3/croot/typing_extensions_1690297474455/work
 tzdata @ file:///croot/python-tzdata_1690578112552/work
 urllib3 @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_e9usuw__8i/croot/urllib3_1686166332689/work
+wandb==0.17.0
 wcwidth @ file:///home/conda/feedstock_root/build_artifacts/wcwidth_1704731205417/work
 Werkzeug==3.0.0
+xgboost==2.0.3
 zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1695255097490/work

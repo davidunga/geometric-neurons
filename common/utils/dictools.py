@@ -46,26 +46,20 @@ def unpack_nested_dict(d: dict) -> tuple[list, list]:
     return key_paths, values
 
 
-def dict_product_from_grid(grid: dict, suffix: str = ''):
+def dict_product_from_grid(grid: dict, base_dict: dict = None):
     """
     Yield product of list values in grid dict.
-        If suffix is provided, only keys that end with suffix strings are regarded as grid points.
-        If suffix not provided, all list values are regarded as grid points.
+    All list values are regarded as grid points.
     """
 
     flat_grid, sep = flatten_dict_autosep(grid)
-    rename_keys = {}
     for k, v in flat_grid.items():
-        if suffix:
-            if k.endswith(suffix):
-                rename_keys[k] = k[:-len(suffix)]
-            else:
-                v = [v]
         flat_grid[k] = [v] if not isinstance(v, list) else v
-    if rename_keys:
-        flat_grid = {rename_keys.get(k, k): v for k, v in flat_grid.items()}
     for flat_dict in dict_product(flat_grid):
-        yield unflatten_dict(flat_dict, sep=sep)
+        d = unflatten_dict(flat_dict, sep=sep)
+        if base_dict:
+            d = deep_merge(deepcopy(base_dict), d)
+        yield d
 
 
 def variance_dicts(dicts: list[dict], flat: bool = True, force_keep: list = None):
