@@ -113,7 +113,7 @@ class SnapshotMgr:
 
     def _fetch_all_snapshots(self) -> dict:
         if self.file.is_file() and self.file.stat().st_size:
-            return torch.load(str(self.file), pickle_module=pickle)
+            return torch.load(str(self.file), pickle_module=pickle, map_location=torch.device('cpu'))
         else:
             return {}
 
