@@ -9,7 +9,7 @@ from common.utils.timetools import timediff
 
 
 def ls(arg: str | Path,
-       sortby: Literal['path', 'name', 'created', 'modified', 'accessed', 'size'] = 'path',
+       sortby: Literal['path', 'name', 'modified', 'accessed', 'size'] = 'path',
        kind: Literal['file', 'dir', 'both'] = 'both',
        allow_zero_size: bool = True
        ) -> list[Path]:
@@ -32,7 +32,6 @@ class FileInfo:
 
     path: Path | str
     size: int = None
-    created: datetime = None
     modified: datetime = None
     inode_change: datetime = None
     accessed: datetime = None
@@ -41,16 +40,12 @@ class FileInfo:
         self.path = Path(self.path)
         stat = self.path.stat()
         self.size = stat.st_size
-        self.created = datetime.fromtimestamp(stat.st_birthtime)
         self.modified = datetime.fromtimestamp(stat.st_mtime)
         self.inode_change = datetime.fromtimestamp(stat.st_ctime)
         self.accessed = datetime.fromtimestamp(stat.st_atime)
 
     def time_ago(self, attrib, unit: str = 's') -> float:
         return timediff.convert(datetime.now() - getattr(self, attrib), unit)
-
-    def days_ago_created(self) -> float:
-        return self.time_ago('created', unit='d')
 
     def days_ago_modified(self) -> float:
         return self.time_ago('modified', unit='d')
