@@ -203,6 +203,9 @@ def make_results_dfs(sort_agg_by: str = 'mean_auc_val') -> tuple[pd.DataFrame, p
 def refresh_results_file(sort_agg_by: str = 'mean_auc_val'):
     results_file = paths.CV_DIR / "results.txt"
     df, agg_df = make_results_dfs(sort_agg_by=sort_agg_by)
+    if not len(df):
+        return
+
     agg_df.rename(columns={col: _abbreviate(col) for col in agg_df}, inplace=True)
     results_file.parent.mkdir(exist_ok=True, parents=True)
 
