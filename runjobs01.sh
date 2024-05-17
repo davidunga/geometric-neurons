@@ -6,8 +6,8 @@ pyfile=analysis/cv_train.py
 #BSUB -o out.%J
 #BSUB -e err.%J
 #BSUB -R "rusage[mem=4096]"
-#BSUB -n 8
-#BSUB -W 24:00
+#BSUB -n 2
+#BSUB -W 96:00
 
 module load $module
 cd ~/geometric-neurons
