@@ -12,6 +12,31 @@ from motorneural.datasets import get_datasets_specs
 from common.utils import dlutils
 import torch
 from common.metric_learning.embedding_models import LinearEmbedder
+from wandb_tools import WandbMgr, is_valid_wandb_state
+from shutil import move
+
+
+def validate_model_files(clear_bad: bool = False):
+    invalids_dir = paths.MODELS_DIR / 'invalid'
+    invalids_dir.mkdir(exist_ok=True)
+
+    wandb_mgr = WandbMgr()
+    all_run_names = wandb_mgr.get_run_names()
+    model_status = {model_file: 'noMatch' for model_file in get_model_files()}
+    for model_file in model_status:
+        model_name = Path(model_file).stem
+        for run_name in all_run_names:
+            if model_name in run_name:
+                model_status[model_file] = 'invalid'
+            if is_valid_wandb_state(wandb_mgr.get_state(run_name)):
+                model_status[model_file] = 'valid'
+                break
+    for model_file, status in model_status.items():
+        if clear_bad and status != 'valid':
+            move(model_file, str(invalids_dir))
+            status += "-> moved"
+        print(str(model_file), "-", status)
+
 
 
 def get_model_and_config(model_file) -> tuple[LinearEmbedder, Config]:
@@ -239,3 +264,16 @@ def _abbreviate(s: str):
         abbrv = abbrv[:-1]
 
     return abbrv
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser_validate = subparsers.add_parser("validate", help="Validate the model")
+    parser_validate.add_argument("--mvbad", action="store_true", help="Clear bad data", dest="clear_bad")
+
+    args = parser.parse_args()
+
+    if args.command == "validate":
+        validate_model_files(clear_bad=args.clear_bad)
