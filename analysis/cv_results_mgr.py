@@ -31,11 +31,15 @@ def validate_model_files(clear_bad: bool = False):
             if is_valid_wandb_state(wandb_mgr.get_state(run_name)):
                 model_status[model_file] = 'valid'
                 break
+
     for model_file, status in model_status.items():
         if clear_bad and status != 'valid':
             move(model_file, str(invalids_dir))
             status += "-> moved"
         print(str(model_file), "-", status)
+
+    print("valids=", sum(s == 'valid' for s in model_status.values()))
+    print("invalids=", sum(s != 'valid' for s in model_status.values()))
 
 
 
