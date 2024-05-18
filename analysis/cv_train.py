@@ -1,5 +1,5 @@
 import datetime
-
+import os
 import numpy as np
 import pandas as pd
 import torch.nn
@@ -148,6 +148,9 @@ class TrainingMgr:
             mode='online',
             id=self.cfg.output_name + " " + datetime.strftime(datetime.now(), "%Y%m%d%H%M%S"),
         )
+
+        if os.environ.get('LSB_JOBID'):
+            print("JobId:", os.environ.get('LSB_JOBID'))
 
         triplet_train(train_sampler=train_sampler,
                       val_sampler=val_sampler,
