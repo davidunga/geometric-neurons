@@ -56,7 +56,7 @@ def triplet_train(
 
         _metrics_to_log = ('loss', 'auc', 'tscore')
 
-        items = {}
+        items = {'epoch': epoch}
 
         if train_eval is not None:
             items.update({f'train_{metric}': getattr(train_eval, metric) for metric in _metrics_to_log})

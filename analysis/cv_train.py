@@ -218,4 +218,4 @@ if __name__ == "__main__":
         wandb_group = 2
 
     run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=30, device='auto',
-           wandb_group=wandb_group, wandb_project="geometric-neurons-04", data_name=data_name)
+           wandb_group=wandb_group, wandb_project="geometric-neurons-05", data_name=data_name)
