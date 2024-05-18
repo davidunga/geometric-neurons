@@ -173,7 +173,7 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
 
     cfgs = [cfg for cfg in Config.yield_from_grid()]
     if data_name is not None:
-        cfgs = [cfg for cfg in cfgs if cfg.data['name'] == data_name]
+        cfgs = [cfg for cfg in cfgs if cfg.data.trials.name == data_name]
 
     max_folds = max([cfg.training.cv.folds for cfg in cfgs])
 
