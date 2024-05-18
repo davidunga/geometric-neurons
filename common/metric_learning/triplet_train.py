@@ -183,8 +183,6 @@ def triplet_train(
                           for i in np.linspace(0, len(items_for_hist) - 1, wandb.Histogram.MAX_LENGTH)]
 
     if not warm_start:
-        _add_to_wandb(train_eval=train_eval, val_eval=val_eval, epoch=-1,
-                      hists={'sample_counts': np.zeros(len(items_for_hist), int)})
         snapshot_mgr.wipe()
         _save_snapshot('init', epoch_=-1)
 

@@ -20,7 +20,7 @@ def sync_wandb_run(run_path: str, only_non_synced: bool = False):
     if only_non_synced:
         cmnd.append('--no-include-synced')
     try:
-        subprocess.run(cmnd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        subprocess.run(cmnd)
     except subprocess.CalledProcessError:
         raise
 
