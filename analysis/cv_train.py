@@ -165,12 +165,16 @@ class TrainingMgr:
 
 def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
            dbg_run: bool = False, wandb_project: str | None = None,
+           data_name: str = None,
            wandb_group: int | str = None,
            early_stop_epoch: int = None,
            cfg_name_include: str = None,
            cfg_name_exclude: str = None, **kwargs):
 
     cfgs = [cfg for cfg in Config.yield_from_grid()]
+    if data_name is not None:
+        cfgs = [cfg for cfg in cfgs if cfg.data['name'] == data_name]
+
     max_folds = max([cfg.training.cv.folds for cfg in cfgs])
 
     grid_cfgs_df = pd.DataFrame.from_records(dictools.variance_dicts([cfg.__dict__ for cfg in cfgs],
@@ -200,5 +204,18 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
 
 if __name__ == "__main__":
     #cv_results_mgr.refresh_results_file()
-    run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=30, device='auto', wandb_group=2,
-           wandb_project="geometric-neurons-04")
+
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-n", "--monkey_name", dest="monkey_name", default="")
+
+    args = parser.parse_args()
+    if args.monkey_name:
+        data_name = 'TP_' + args.monkey_name
+        wandb_group = args.monkey_name
+    else:
+        data_name = None
+        wandb_group = 2
+
+    run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=30, device='auto',
+           wandb_group=wandb_group, wandb_project="geometric-neurons-04", data_name=data_name)
