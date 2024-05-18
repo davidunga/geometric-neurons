@@ -169,6 +169,7 @@ class TrainingMgr:
 def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
            dbg_run: bool = False, wandb_project: str | None = None,
            data_name: str = None,
+           shuff_order: bool = True,
            wandb_group: int | str = None,
            early_stop_epoch: int = None,
            cfg_name_include: str = None,
@@ -177,6 +178,9 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
     cfgs = [cfg for cfg in Config.yield_from_grid()]
     if data_name is not None:
         cfgs = [cfg for cfg in cfgs if cfg.data.trials.name == data_name]
+
+    if shuff_order:
+        cfgs = [cfgs[i] for i in np.random.default_rng(1).permutation(len(cfgs))]
 
     max_folds = max([cfg.training.cv.folds for cfg in cfgs])
 

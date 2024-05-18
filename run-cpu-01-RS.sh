@@ -6,7 +6,7 @@ pyfile=analysis/cv_train.py
 #BSUB -o out.%J
 #BSUB -e err.%J
 #BSUB -R "rusage[mem=2048]"
-#BSUB -n 2
+#BSUB -n 1
 #BSUB -W 96:00
 
 module load $module
