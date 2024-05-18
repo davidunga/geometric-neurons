@@ -325,6 +325,10 @@ class ProgressManager:
                 'state': 'ongoing' if not self.should_stop else f'stopped:{self.stop_reason}',
                 'epoch': self._epoch}
 
+    def set_stop(self, reason: str | None):
+        self._stop_reason = '' if not reason else reason
+        self._stop_epoch = self._epoch
+
     def process(self, val_loss: float, train_loss: float, val_score: float, epoch: int = None) -> None:
 
         if epoch is not None:
@@ -334,23 +338,20 @@ class ProgressManager:
         epoch = self._epoch
 
         self._is_new_nest = False
-        self._stop_reason = ''
+        self.set_stop(None)
 
         for criterion in self.criteria:
             self.criteria[criterion].update(val_loss, train_loss, enable_count=epoch >= self.grace_period)
             if self.patience is not None and self.criteria[criterion].count > self.patience:
-                self._stop_reason = criterion
-                self._stop_epoch = epoch
+                self.set_stop(criterion)
 
         if self._best_val_score is None or val_score > self._best_val_score:
             self._is_new_nest = True
-            self._stop_reason = ''
-            self._stop_epoch = None
             self._best_val_score = val_score
+            self.set_stop(None)
 
         if self.epochs is not None and (epoch + 1) >= self.epochs:
-            self._stop_reason = 'last_epoch'
-            self._stop_epoch = epoch
+            self.set_stop('last_epoch')
 
 
 class BatchManager:

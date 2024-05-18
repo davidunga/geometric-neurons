@@ -13,6 +13,7 @@ from common.utils.devtools import progbar
 from common.utils.typings import *
 from itertools import product
 import wandb
+from wandb_tools import sync_wandb_run
 import auth
 
 
@@ -45,6 +46,7 @@ def triplet_train(
 
     # ------
 
+    MAX_INIT_AUC = .6
     DEFAULT_OPTIMIZER_KIND = 'Adam'
 
     # ------
@@ -73,6 +75,7 @@ def triplet_train(
                 items[hist_name] = wandb.Histogram(np_histogram=hist)
 
         wandb_run.log(data=items, step=epoch)
+        sync_wandb_run(wandb_run.path)
 
     def _save_snapshot(kind: str, epoch_: int):
         """
@@ -260,6 +263,15 @@ def triplet_train(
 
         print('')
 
+        if train_eval.auc > MAX_INIT_AUC:
+            progress_mgr.set_stop('high_init_auc')
+
         if progress_mgr.should_stop:
             print("Stopping due to " + progress_mgr.stop_reason)
             break
+
+    wandb_run.finish()
+
+
+
+

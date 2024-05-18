@@ -29,7 +29,8 @@ class TrainingMgr:
                  dbg_run: bool = False,
                  early_stop_epoch: int = None,
                  exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
-                 group: int | str = None,
+                 wandb_project: str | None = None,
+                 wandb_group: int | str = None,
                  **kwargs):
 
         self.cfg = cfg if isinstance(cfg, Config) else Config(cfg)
@@ -38,7 +39,8 @@ class TrainingMgr:
         self.dbg_run = dbg_run
         self.early_stop_epoch = early_stop_epoch
         self.exists_handling = exists_handling
-        self.group = f"{group:04d}" if isinstance(group, int) else group
+        self.wandb_project = "geometric-neurons" if not wandb_project else wandb_project
+        self.wandb_group = f"{wandb_group:04d}" if isinstance(wandb_group, int) else wandb_group
         self._kwargs = kwargs
 
     def as_dict(self) -> dict:
@@ -138,10 +140,10 @@ class TrainingMgr:
 
         wandb.login(key=auth.get_key('wandb'), relogin=False, force=False)
         wandb_run = wandb.init(
-            project="geometric-neurons",
+            project=self.wandb_project,
             config=self.as_dict(),
             name=self.cfg.short_output_name,
-            group=self.group,
+            group=self.wandb_group,
             dir=paths.WANDB_ROOT,
             id=self.cfg.output_name + " " + datetime.strftime(datetime.now(), "%Y%m%d%H%M%S"),
         )
@@ -161,8 +163,8 @@ class TrainingMgr:
 
 
 def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] = "skip",
-           dbg_run: bool = False,
-           group: int | str = None,
+           dbg_run: bool = False, wandb_project: str | None = None,
+           wandb_group: int | str = None,
            early_stop_epoch: int = None,
            cfg_name_include: str = None,
            cfg_name_exclude: str = None, **kwargs):
@@ -188,7 +190,8 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
             print(grid_cfgs_df.loc[cfg_ix].to_string())
 
             training_mgr = TrainingMgr(cfg, fold=fold, dbg_run=dbg_run, early_stop_epoch=early_stop_epoch,
-                                       exists_handling=exists_handling, group=group, **kwargs)
+                                       exists_handling=exists_handling, wandb_project=wandb_project,
+                                       wandb_group=wandb_group, **kwargs)
             success = training_mgr.dispatch()
             if success:
                 cv_results_mgr.refresh_results_file()
@@ -196,4 +199,5 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
 
 if __name__ == "__main__":
     cv_results_mgr.refresh_results_file()
-    run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=None, device='auto', group=1)
+    run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=30, device='auto', group=2,
+           wandb_project="geometric-neurons-02")
