@@ -1,4 +1,5 @@
-import os.path
+import os
+import subprocess
 from glob import glob
 import json
 from pathlib import Path
@@ -14,12 +15,26 @@ def is_valid_wandb_state(state: str) -> bool:
     return state in VALID_STATES
 
 
+def sync_wandb_run(run_path: str, only_non_synced: bool = False):
+    cmnd = ['wandb', 'sync', run_path]
+    if only_non_synced:
+        cmnd.append('--no-include-synced')
+    try:
+        subprocess.run(cmnd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except subprocess.CalledProcessError:
+        raise
+
+
 class WandbMgr:
 
     _run_prefix = 'run-'
 
     def __init__(self, root: Path | str = paths.WANDB_ROOT):
         self._root = Path(root) / 'wandb'
+
+    def sync_all(self, only_non_synced: bool = True):
+        run_path = str(self._root / (self._run_prefix + '*'))
+        sync_wandb_run(run_path, only_non_synced=only_non_synced)
 
     def get_run_names(self, wild: str = '*', state: str | Sequence[str] = None) -> list[str]:
         if not wild.startswith(self._run_prefix):
