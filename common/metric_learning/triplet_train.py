@@ -11,10 +11,7 @@ from common.utils import dlutils
 from common.utils import tbtools
 from common.utils.devtools import progbar
 from common.utils.typings import *
-from itertools import product
 import wandb
-from wandb_tools import sync_wandb_run
-import auth
 
 
 def triplet_train(
@@ -52,7 +49,7 @@ def triplet_train(
     # ------
 
     def _add_to_wandb(train_eval: EmbeddingEvalResult, val_eval: EmbeddingEvalResult,
-                      epoch: int, hists: dict = None):
+                      epoch: int, hists: dict = None, additionals: dict = None):
 
         if wandb_run is None:
             return
@@ -74,8 +71,11 @@ def triplet_train(
                     hist = (hist, bin_edges)
                 items[hist_name] = wandb.Histogram(np_histogram=hist)
 
-        wandb_run.log(data=items, step=epoch)
-        sync_wandb_run(wandb_run.path)
+        if additionals is not None:
+            items.update(additionals)
+
+        wandb_run.log(data=items, step=epoch, commit=True)
+
 
     def _save_snapshot(kind: str, epoch_: int):
         """
@@ -236,9 +236,12 @@ def triplet_train(
         train_eval = train_evaluator.evaluate(embedder=model, inputs=inputs)
         val_eval = val_evaluator.evaluate(embedder=model, inputs=inputs)
 
-        print(f' ({time() - epoch_start_t:2.1f}s) Train: {train_eval} Val: {val_eval}', end='')
+        epoch_time = time() - epoch_start_t
+        print(f' ({epoch_time:2.1f}s) Train: {train_eval} Val: {val_eval}', end='')
         _add_to_wandb(train_eval=train_eval, val_eval=val_eval, epoch=epoch,
-                      hists={'sample_counts': sample_counts[items_for_hist]})
+                      hists={'sample_counts': sample_counts[items_for_hist]},
+                      additionals={'epoch_time': epoch_time,
+                                   'single_sample_time': epoch_time / (batches_in_epoch * batch_size)})
 
         progress_mgr.process(val_eval.loss, train_eval.loss, val_eval.auc, epoch=epoch)
         print(' ' + progress_mgr.report(), end='')
@@ -261,7 +264,7 @@ def triplet_train(
 
         print('')
 
-        if train_eval.auc > MAX_INIT_AUC:
+        if epoch == 0 and train_eval.auc > MAX_INIT_AUC:
             progress_mgr.set_stop('high_init_auc')
 
         if progress_mgr.should_stop:

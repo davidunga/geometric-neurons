@@ -145,6 +145,7 @@ class TrainingMgr:
             name=self.cfg.short_output_name,
             group=self.wandb_group,
             dir=paths.WANDB_ROOT,
+            mode='online',
             id=self.cfg.output_name + " " + datetime.strftime(datetime.now(), "%Y%m%d%H%M%S"),
         )
 
@@ -198,6 +199,6 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
 
 
 if __name__ == "__main__":
-    cv_results_mgr.refresh_results_file()
+    #cv_results_mgr.refresh_results_file()
     run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=30, device='auto', wandb_group=2,
-           wandb_project="geometric-neurons-03")
+           wandb_project="geometric-neurons-04")
