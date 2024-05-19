@@ -19,6 +19,7 @@ from typing import Literal
 import wandb
 import auth
 from datetime import datetime
+from running import run_controller
 
 
 class TrainingMgr:
@@ -197,6 +198,10 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
                 continue
             if cfg_name_exclude is not None and cfg_name_exclude in cfg.str():
                 continue
+
+            if not run_controller.safe_load_settings().get('run', True):
+                print("Run disabled -- Quitting.")
+                return
 
             print(f"cfg {cfg_ix + 1}/{len(cfgs)}, fold {fold}:")
             print(grid_cfgs_df.loc[cfg_ix].to_string())
