@@ -43,7 +43,8 @@ def triplet_train(
 
     # ------
 
-    MAX_INIT_AUC = .6
+    MAX_INIT_VAL_AUC = .6
+    MAX_INIT_TRAIN_AUC = .7
     DEFAULT_OPTIMIZER_KIND = 'Adam'
 
     # ------
@@ -264,7 +265,7 @@ def triplet_train(
 
         print('')
 
-        if epoch == 0 and train_eval.auc > MAX_INIT_AUC:
+        if epoch == 0 and train_eval.auc > MAX_INIT_TRAIN_AUC or val_eval.auc > MAX_INIT_VAL_AUC:
             progress_mgr.set_stop('high_init_auc')
 
         if progress_mgr.should_stop:
