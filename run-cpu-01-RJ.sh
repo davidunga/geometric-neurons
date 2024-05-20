@@ -14,4 +14,4 @@ cd ~/geometric-neurons
 source bin/activate
 git pull
 export PYTHONPATH='.'
-python $pyfile -n RJ
+python $pyfile -n RJ --best

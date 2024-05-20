@@ -171,12 +171,13 @@ def run_cv(exists_handling: Literal["warm_start", "overwrite", "skip", "error"] 
            dbg_run: bool = False, wandb_project: str | None = None,
            data_name: str = None,
            shuff_order: bool = True,
+           best: bool = False,
            wandb_group: int | str = None,
            early_stop_epoch: int = None,
            cfg_name_include: str = None,
            cfg_name_exclude: str = None, **kwargs):
 
-    cfgs = [cfg for cfg in Config.yield_from_grid()]
+    cfgs = [cfg for cfg in Config.yield_from_grid(best=best)]
     if data_name is not None:
         cfgs = [cfg for cfg in cfgs if cfg.data.trials.name == data_name]
 
@@ -220,14 +221,17 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--monkey_name", dest="monkey_name", default="")
+    parser.add_argument("--best", dest="best", action="store_true")
 
     args = parser.parse_args()
     if args.monkey_name:
         data_name = 'TP_' + args.monkey_name
         wandb_group = args.monkey_name
+        best = args.best
     else:
         data_name = None
         wandb_group = 2
+        best = args.best
 
-    run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=30, device='auto',
+    run_cv(exists_handling="skip", dbg_run=False, early_stop_epoch=False, device='auto', best=best,
            wandb_group=wandb_group, wandb_project="geometric-neurons-05", data_name=data_name)

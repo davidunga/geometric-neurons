@@ -8,6 +8,7 @@ from copy import deepcopy
 from common.utils import dictools
 
 _configs_grid = yaml.safe_load((ANALYSIS_DIR / 'configs_grid.yml').open('r'))
+_configs_best_grid = yaml.safe_load((ANALYSIS_DIR / 'configs_grid_best.yml').open('r'))
 _config_mods_for_eval = yaml.safe_load((ANALYSIS_DIR / 'config_mods_for_eval.yml').open('r'))
 
 
@@ -28,8 +29,8 @@ class Config:
         return cls(next(dictools.dict_product_from_grid(_configs_grid)))
 
     @classmethod
-    def yield_from_grid(cls):
-        for cfg_dict in dictools.dict_product_from_grid(_configs_grid):
+    def yield_from_grid(cls, best: bool = False):
+        for cfg_dict in dictools.dict_product_from_grid(_configs_best_grid if best else _configs_grid):
             yield cls(cfg_dict)
 
     def str(self) -> str:
