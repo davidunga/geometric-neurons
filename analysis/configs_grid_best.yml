@@ -22,24 +22,24 @@ data:
       normalize: [True]
 
 model:
-  dim: [3, 5]
-  dropout: .75
+  dim: [3, 4]
+  dropout: [.75, .85]
 
 training:
   cv:
     rand_seed: 0
-    folds: 3
+    folds: 5
   progress_mgr_params:
     patience: null
     overfit: 100
     converge: 1.e-4
   noise_sigma: .05
-  p_hard: .5
-  epochs: 50
+  p_hard: [.5, .75]
+  epochs: [100]
   batch_size: 64
   batches_in_epoch: 4000
   n_eval_triplets: 5000
   loss_margin: 1.
   optim_params:
     kind: SGD
-    lr: 0.0001
+    lr: [0.0001, 0.0005]
