@@ -7,7 +7,10 @@ from screeninfo import get_monitors, Monitor
 import seaborn as sns
 from common.utils import stats
 from typing import Sequence
-
+from scipy.stats import gaussian_kde
+from matplotlib.patches import Ellipse
+from sklearn.covariance import MinCovDet
+from common.utils import gaussians
 
 def plot(xy, *args, **kwargs):
     if isinstance(xy, tuple):
@@ -23,9 +26,12 @@ def plot(xy, *args, **kwargs):
     plt.plot(x, y, *args, **kwargs)
 
 
+def get_nice_colors() -> list[str]:
+    return ['DodgerBlue', 'HotPink', 'LimeGreen', 'Orange', 'Crimson', 'SlateBlue']
 
-def set_axis_equal(ax=None):
-    ax = plt.gca() if ax is None else ax
+
+def set_axis_equal(ax='gca'):
+    ax = get_ax(ax)
     ax.set_aspect('equal', adjustable='box')
 
 
@@ -244,26 +250,101 @@ def make_split_grid(nrows: int):
     return small_axs, big_ax
 
 
-def new_subplots(figsize=(10, 6), nrows=None, ncols=None, **kwargs):
-    sns.set_style("darkgrid")
+def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2, figsize=(10, 6), **kwargs):
+    assert ndim in (2, 3)
+    sns.set_style('darkgrid')
+    if ndim == 3:
+        kwargs['subplot_kw'] = kwargs.get('subplot_kw', {})
+        kwargs['subplot_kw']['projection'] = '3d'
     fig, axs = plt.subplots(figsize=figsize, nrows=nrows, ncols=ncols,  **kwargs)
     if not hasattr(axs, '__len__'):
         axs = np.array([axs])
-    return fig, axs
-
-
-def named_subplots(cols: Sequence = None, rows: Sequence = None, figsize=(10, 6), **kwargs):
-    fig, axs = new_subplots(nrows=len(rows) if rows else 1, ncols=len(cols) if cols else 1,
-                            figsize=figsize, **kwargs)
-    if rows is not None and cols is not None:
-        axs = dict(zip(product(rows, cols), axs.flatten()))
-    elif rows is not None:
-        axs = {row: ax for row, ax in zip(rows, axs.flatten())}
-    elif cols is not None:
-        axs = {col: ax for col, ax in zip(cols, axs.flatten())}
     return axs
 
 
+#
+# def new_subplots(figsize=(10, 6), nrows=1, ncols=1, **kwargs):
+#     sns.set_style("darkgrid")
+#     fig, axs = plt.subplots(figsize=figsize, nrows=nrows, ncols=ncols,  **kwargs)
+#     if not hasattr(axs, '__len__'):
+#         axs = np.array([axs])
+#     return fig, axs
+
+
+def named_subplots(cols: Sequence = None, rows: Sequence = None, **kwargs) -> dict:
+
+    if cols is None and rows is None:
+        raise ValueError('At least one of cols and rows must be provided')
+
+    if isinstance(rows, dict): rows = rows.keys()
+    if isinstance(cols, dict): cols = cols.keys()
+
+    if cols is not None and rows is not None:
+        keys = product(rows, cols)
+    else:
+        keys = cols if cols is not None else rows
+
+    axs = subplots(nrows=1 if rows is None else len(rows),
+                   ncols=1 if cols is None else len(cols), **kwargs)
+    named_axs = dict(zip(keys, axs.flatten()))
+    return named_axs
+
+
+def get_all_figures():
+    figures = [plt.figure(i) for i in plt.get_fignums()]
+    return figures
+
+
+def get_ax(ax):
+    if isinstance(ax, str):
+        if ax == 'gca':
+            return plt.gca()
+        elif ax == 'new':
+            return subplots()[0]
+        else:
+            raise ValueError('Unknown axis type')
+    assert ax is not None
+    return ax
+
+
+def plot_2d_gaussian_ellipse(pts, n_std=2.0, ax='gca', support_fraction: float = .9, **kwargs):
+    gauss, inliers_mask = gaussians.gaussian_fit(pts, support_fraction=support_fraction)
+    center, (width, height), angle = gaussians.gaussian2d_to_ellipse(gauss, n_std=n_std)
+    ellipse = Ellipse(xy=center, width=width, height=height, angle=angle, **kwargs)
+    get_ax(ax).add_patch(ellipse)
+    return gauss, inliers_mask
+
+
+def merge_figures():
+    figures = get_all_figures()
+    combined_fig, axs = plt.subplots(1, len(figures), figsize=(15, 5))
+
+    # Merge all figures into the new figure with subplots
+    for i, fig in enumerate(figures):
+        for ax in fig.get_axes():
+            # Copy each axis from the original figures
+            ax.get_shared_x_axes().remove(ax)
+            ax.get_shared_y_axes().remove(ax)
+            combined_fig._axstack.add(combined_fig._make_key(ax), ax)
+            ax.change_geometry(1, len(figures), i + 1)
+
+    # Close the original figures to avoid redundancy
+    for fig in figures:
+        plt.close(fig)
+
+    # Display the combined figure
+    plt.show()
+
+
+def prep_roc_axis(ax=None):
+    if ax is None:
+        ax = subplots()[0]
+    ax.plot([0, 1], [0, 1], 'k:')
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.set_aspect('equal')
 
 def plot_binned_stats(x, y, bins: stats.BinSpec, loc: str = 'avg', band: str = 'error', idline: bool = True,
                       ax=None, counts: bool = True, **plot_kwargs) -> tuple[plt.Axes, list]:
@@ -274,10 +355,18 @@ def plot_binned_stats(x, y, bins: stats.BinSpec, loc: str = 'avg', band: str = '
 
     stats_ = stats.calc_binned_stats(x, y, stats=['n', loc, band], bins=bins)
     if ax is None:
-        _, ax = new_subplots()
+        ax = subplots()[0]
+
+    stats_['x'] -= np.nanmin(stats_['x'])
+    stats_['x'] /= np.nanmax(stats_['x'])
+
+    stats_[loc] -= np.nanmin(stats_[loc])
+    stats_[loc] /= np.nanmax(stats_[loc])
 
     if idline:
         ax.plot(stats_['x'], stats_['x'], ':', lw=.5, color='gray', label=None)
+
+
     p = bandplot(stats_['x'], stats_[loc], stats_[band], **plot_kwargs, label=loc.capitalize(),
                  band_kws={'label': f'± {band.upper()}'}, ax=ax)
     if counts:
@@ -327,7 +416,7 @@ def adjust_line_widths(ax_or_lines, min_width: float = 1, width_step: float = 1)
         line.set_linewidth(width)
 
 
-def get_grid_for_points(pts: np.ndarray, n: int = 1000, s: float = 1.5):
+def get_grid_for_points(pts: np.ndarray, n: int = 500, s: float = 1.1):
     """
     x, y of grid that covers a set of points
     Args:

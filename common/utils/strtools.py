@@ -4,6 +4,9 @@ import numpy as np
 def to_str(x, f='2.3'):
     if isinstance(x, float):
         return f"{x:{f + 'f'}}"
+    elif isinstance(x, (list, tuple, np.ndarray)):
+        s = ', '.join([to_str(xx, f=f) for xx in x])
+        return f'({s})' if isinstance(x, tuple) else f'[{s}]'
     else:
         return str(x)
 

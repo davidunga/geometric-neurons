@@ -349,7 +349,8 @@ def show_correlates_for_neuron(model_file):
 
 
 if __name__ == "__main__":
-    file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
+    file = cv_results_mgr.get_chosen_model_file('RS')
+    #file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
     #draw_trajectories_grouped_by_embedded_dist(file)
     #neuron_vs_kin_extrema_match(file)
     show_correlates_for_neuron(file)

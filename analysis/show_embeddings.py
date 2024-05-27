@@ -68,7 +68,7 @@ def _draw_group_trajs(trajs, aligner, scale, draw_conic: bool = False):
     paths_raster, raster_scale, raster_offset = polytools.rasterize_paths(aligned_trajs, raster_size, width=raster_lw)
 
     if draw_conic:
-        conic, pts = fit_conic_to_traj_raster(paths_raster)
+        conic, pts = fit_conic_to_traj_raster(paths_raster, kind='p')
         if mode != 'img':
             pts = (pts - raster_offset) / raster_scale
             conic = conic.get_transformed(offset=-raster_offset, sx=1/raster_scale[0], sy=1/raster_scale[1])
@@ -94,21 +94,21 @@ def _draw_group_trajs(trajs, aligner, scale, draw_conic: bool = False):
             plt.gca().set_aspect('equal', adjustable='box')
 
     if conic is not None:
-        plt.plot(*pts.T,'r.')
+        #plt.plot(*pts.T,'r.')
         conic.draw(x=pts[:, 0], y=pts[:, 1], details=False, color='c')
         plt.title(str(conic))
 
 
-def draw_trajectories_grouped_by_embedded_dist(model_file, shuff: bool = False):
+def draw_trajectories_grouped_by_embedded_dist(
+        model_file, shuff: bool = False, n_groups_to_draw: int = 3,
+        n_segs_in_group: int = 50, seed: int = 1):
     """
     group segments by their embedding distance, and draw trajectories of a random subset of
     the groups.
     """
+
     # -----------------------
-    n_groups_to_draw = 5
-    n_segs_in_group = 50
-    n_raw_clusters = 1 / 50
-    seed = 1
+    n_raw_clusters = 1 / n_segs_in_group
     # -----------------------
 
     aligners = [PlanarAligner('offset'), PlanarAligner('rigid'), PlanarAligner('ortho')]
@@ -124,6 +124,9 @@ def draw_trajectories_grouped_by_embedded_dist(model_file, shuff: bool = False):
     traj_scale = 2 * np.mean([np.std(traj, axis=0).mean() for traj in trajs])
 
     # normalized embedded distances
+    neural_pop = NeuralPopulation.from_model(model_file)
+    vecs[:, ~neural_pop.inputs_mask(NEURAL_POP.MAJORITY)] = .0
+    vecs[:, neural_pop.inputs_mask(NEURAL_POP.MAJORITY)] = .0
     embedded_vecs = dlutils.safe_predict(model, vecs)
 
     # raw clusters:
@@ -158,7 +161,8 @@ def draw_trajectories_grouped_by_embedded_dist(model_file, shuff: bool = False):
     for j, seg_ixs in enumerate(segment_groups):
         for i, aligner in enumerate(aligners):
             plt.sca(axs[i, j])
-            _draw_group_trajs([trajs[i] for i in seg_ixs], aligner, traj_scale, draw_conic=aligner.kind=='ortho')
+            _draw_group_trajs([trajs[i] for i in seg_ixs], aligner, traj_scale,
+                              draw_conic=aligner.kind=='ortho1')
 
     plotting.set_outter_labels(axs, y=[aligner.kind for aligner in aligners],
                                t=[f'cluster{i+1}' for i in range(len(segment_groups))])
@@ -191,33 +195,37 @@ def draw_embedded_vs_metric_dists(model_file):
 
     vecs, _ = data_mgr.get_inputs()
     vecs = torch.as_tensor(vecs, dtype=torch.float32)
-    binned_plot_kws = {'n_bins': 10, 'kind': 'p', 'loc': 'med', 'color': 'limeGreen', 'band': 'error'}
+    binned_plot_kws = {'bins': stats.BinSpec(10, 'u'), 'loc': 'med', 'color': 'limeGreen', 'band': 'scale'}
 
-    for embed in [False, True]:
-        if embed:
-            embedded_vecs = model(vecs)
+    neural_pop = NeuralPopulation.from_model(model_file)
+    vecs = Rnd(1).shuffle(vecs)
+
+    for embed in [False, True, 'Rand']:
+        if embed == 'Rand':
+            embedded_vecs = dlutils.safe_predict(dlutils.randomize_weights(model), vecs)
         else:
-            embedded_vecs = vecs
-        embedded_vecs = embedded_vecs.detach().cpu().numpy()
+            embedded_vecs = dlutils.safe_predict(model, vecs) if embed else vecs
         embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
         plotting.plot_binned_stats(x=metric_dists, y=embedded_dists, **binned_plot_kws)
         plt.title(f"Embed={embed}")
 
-    embedded_vecs = model(vecs)
-    embedded_vecs = embedded_vecs.detach().cpu().numpy()
-    for dff in ['df', 'rdf']:
-        xx = arclen_diff if dff == 'df' else arclen_rdiff
-        embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
-        plotting.plot_binned_stats(x=xx, y=embedded_dists, **binned_plot_kws)
-        plt.title(dff)
+    # embedded_vecs = model(vecs)
+    # embedded_vecs = embedded_vecs.detach().cpu().numpy()
+    # for dff in ['df', 'rdf']:
+    #     xx = arclen_diff if dff == 'df' else arclen_rdiff
+    #     embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
+    #     plotting.plot_binned_stats(x=xx, y=embedded_dists, **binned_plot_kws)
+    #     plt.title(dff)
 
 
 
 
 if __name__ == "__main__":
-    file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
-    draw_trajectories_grouped_by_embedded_dist(file, shuff=False)
-    draw_trajectories_grouped_by_embedded_dist(file, shuff=True)
+    file = cv_results_mgr.get_chosen_model_file('RJ')
+    draw_embedded_vs_metric_dists(file)
+    #file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
+    #draw_trajectories_grouped_by_embedded_dist(file, shuff=False, n_segs_in_group=20, n_groups_to_draw=3)
+    #draw_trajectories_grouped_by_embedded_dist(file, shuff=True, n_segs_in_group=20, n_groups_to_draw=3)
     plt.show()
 
 

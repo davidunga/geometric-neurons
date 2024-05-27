@@ -7,8 +7,10 @@ from data_manager import DataMgr
 from common.utils.typings import *
 import cv_results_mgr
 from common.utils import stats
+from common.utils import dlutils
 from scipy.spatial.distance import squareform, pdist
 from enum import Enum
+from common.utils.randtool import Rnd
 
 
 class NEURAL_POP(Enum):
@@ -73,10 +75,13 @@ class NeuralPopulation:
                 raise ValueError("Unknown rank type")
         return [neurons[i] for i in si]
 
-    def inputs_mask(self, pop: str | NEURAL_POP = NEURAL_POP.FULL) -> np.ndarray[int]:
-        if isinstance(pop, str):
-            return self.input_neuron_names == pop
-        return np.fromiter((self.population[neuron].is_(pop) for neuron in self.input_neuron_names), bool)
+    def inputs_mask(self, pop: list[str] | NEURAL_POP = NEURAL_POP.FULL) -> np.ndarray[int]:
+        if isinstance(pop, NEURAL_POP):
+            pop = self.neurons(pop)
+        assert isinstance(pop, list)
+        mask = np.fromiter((neuron in pop for neuron in self.input_neuron_names), bool)
+        assert np.any(mask)
+        return mask
 
     @property
     def normalized_weight(self) -> dict[str, float]:
@@ -84,6 +89,8 @@ class NeuralPopulation:
         return {neuron: weight / max_weight for neuron, weight in self.weight.items()}
 
     def draw(self, neurons_to_highlight: list[str] = None):
+        xlm_margin = 2
+
         if neurons_to_highlight is None:
             neurons_to_highlight = []
 
@@ -91,9 +98,7 @@ class NeuralPopulation:
         jp = sns.jointplot(data=self.data, x=self.data.index, y='weight', hue='population', kind='scatter',
                            palette=palette, alpha=.75)
         jp.ax_marg_x.remove()
-        xlm_margin = 2
         jp.ax_joint.set_xlim([-xlm_margin, len(self.neurons()) + xlm_margin - 1])
-
         for r in self.data.loc[:].itertuples():
             if r.population == NEURAL_POP.MINORITY or r.neuron in neurons_to_highlight:
                 plt.text(r.Index, r.weight, r.neuron, color=palette[r.population])
@@ -102,36 +107,45 @@ class NeuralPopulation:
             data_ = self.data.loc[self.data['neuron'].isin(neurons_to_highlight)]
             jp.ax_joint.plot(data_.index, data_['weight'], 'w+')
 
-        plt.title("Contribution of Neurons to Embedded Representation" + "\n")
-        plt.show()
+        plt.title("Contribution of Neurons to Embedded Representation")
+        plt.xlabel("Neuron Index")
 
 
 def get_neural_population(model_file) -> NeuralPopulation:
 
     # -----
-    weight_agg_func = np.median  # aggregation of weight scores per neuron
+    max_n_samples = 1000
+    squared_dist = True
+    rnd = Rnd(seed=1)
     # -----
 
     model, cfg = cv_results_mgr.get_model_and_config(model_file)
-    weights = _extract_model_weights(model)
     data_mgr = DataMgr(cfg.data)
 
-    input_neuron_names = np.array(data_mgr.get_inputs()[1]['input_neuron_names'])
+    input_vecs, inputs_meta = data_mgr.get_inputs()
+    input_vecs = rnd.subset(input_vecs, min(max_n_samples, len(input_vecs)))
+
+    input_neuron_names = np.array(inputs_meta['input_neuron_names'])
     neuron_names = sorted(set(input_neuron_names))
-    assert len(input_neuron_names) == weights.shape[1]
 
-    records = []
-    for index, neuron in enumerate(neuron_names):
-        weight = weight_agg_func(np.abs(weights[:, input_neuron_names == neuron]))
-        records.append({'neuron': neuron, 'weight': weight, 'population': NEURAL_POP.FULL})
+    neuron_exclude_masks = ~np.stack([input_neuron_names == neuron for neuron in neuron_names], axis=0)
+    dists = np.zeros((len(neuron_names), len(input_vecs)), float)
+    for sample_ix, input_vec in enumerate(input_vecs):
+        x0 = dlutils.safe_predict(model, input_vec)
+        for neuron_ix, neuron in enumerate(neuron_names):
+            input_without_neuron = input_vec * neuron_exclude_masks[neuron_ix]
+            x = dlutils.safe_predict(model, input_without_neuron)
+            dists[neuron_ix, sample_ix] = np.sum((x - x0) ** 2)
 
-    neural_pop = NeuralPopulation(data=pd.DataFrame(records), input_neuron_names=input_neuron_names)
-    neural_pop = cluster_populations_by_model_weights(neural_pop)
+    weights = np.mean(dists, axis=1) if squared_dist else np.mean(np.sqrt(dists), axis=1)
+    data = pd.DataFrame({'neuron': neuron_names, 'weight': weights, 'population': NEURAL_POP.FULL})
+    neural_pop = NeuralPopulation(data=data, input_neuron_names=input_neuron_names)
+    neural_pop = cluster_populations_by_weights(neural_pop)
 
     return neural_pop
 
 
-def cluster_populations_by_model_weights(neural_pop: NeuralPopulation) -> NeuralPopulation:
+def cluster_populations_by_weights(neural_pop: NeuralPopulation) -> NeuralPopulation:
 
     # ----
     inliers = stats.Inliers('iqr')  # inlier selection method
@@ -157,15 +171,9 @@ def cluster_populations_by_model_weights(neural_pop: NeuralPopulation) -> Neural
     return ret
 
 
-def _extract_model_weights(model: torch.nn.Module) -> NpMatrix:
-    names = [name for name in model.state_dict() if 'weight' in name]
-    assert len(names) == 1
-    weights = model.state_dict()[names[0]].detach().numpy()
-    return weights
-
-
 if __name__ == "__main__":
-    file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
-    pop = get_neural_population(file)
-    pop.draw()
-
+    for monkey, file in cv_results_mgr.get_chosen_model_per_monkey().items():
+        pop = get_neural_population(file)
+        pop.draw()
+        plt.title("Contribution of Neurons to Embedded Representation\n" + monkey)
+    plt.show()

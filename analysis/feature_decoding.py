@@ -7,7 +7,6 @@ from common.utils.scoring import BootstrapEvaluator
 from sklearn.model_selection import cross_val_predict, cross_validate
 from common.utils import sigproc
 from common.utils import mltools
-from show_embeddings import plot_binned_stats, _new_subplots
 from analysis.neural_population import NEURAL_POP, NeuralPopulation
 from itertools import product
 from common.utils import stats
@@ -151,6 +150,6 @@ def decode_features_from_neural(model_file):
 
 
 if __name__ == "__main__":
-    file = "/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal f70c5c.Fold0.pth"
-    #draw_trajectories_grouped_by_embedded_dist(file)
-    decode_features_from_neural(file)
+    for monkey, model_file in cv_results_mgr.get_chosen_model_per_monkey().items():
+        decode_features_from_neural(model_file)
+

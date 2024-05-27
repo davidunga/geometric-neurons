@@ -1,0 +1,45 @@
+data:
+  trials:
+    name: TP_RS
+    bin_sz: 0.01
+    lag: 0.1
+  segments:
+    dur: 0.2
+    radcurv_bounds:
+    - 0.2
+    - 5
+  pairing:
+    variable: kin.X
+    align_kind: affine
+    dist_metric: nmahal
+    same_pctl: 0.05
+    notSame_pctl: 0.2
+    exclude_pctl: 0.8
+    balance: true
+    shuffle: false
+  inputs:
+    variable: neural
+    bin_sz: 0.05
+    drop_zero_variance: true
+    normalize: true
+model:
+  dim: 4
+  dropout: 0.85
+training:
+  cv:
+    rand_seed: 0
+    folds: 5
+  progress_mgr_params:
+    patience: null
+    overfit: 100
+    converge: 0.0001
+  noise_sigma: 0.05
+  p_hard: 0.5
+  epochs: 100
+  batch_size: 64
+  batches_in_epoch: 4000
+  n_eval_triplets: 5000
+  loss_margin: 1.0
+  optim_params:
+    kind: SGD
+    lr: 0.0001

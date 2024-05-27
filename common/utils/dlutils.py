@@ -12,6 +12,20 @@ from common.utils.robust_pickle import get_robust_pickle_module
 pickle = get_robust_pickle_module([embedding_models])
 
 
+def randomize_weights(model: torch.nn.Module, inplace: bool = False, seed: int = 1):
+    if not inplace:
+        model = deepcopy(model)
+    original_rng_state = torch.get_rng_state()
+    torch.manual_seed(seed)
+    for layer in model.children():
+        if hasattr(layer, 'reset_parameters'):
+            layer.reset_parameters()
+        if hasattr(layer, 'children'):
+            randomize_weights(layer, inplace=True, seed=seed+1)
+    torch.set_rng_state(original_rng_state)
+    return model
+
+
 def safe_predict(model: torch.nn.Module, x: NDArray | torch.Tensor) -> NDArray:
     is_training = model.training
     model.train(False)

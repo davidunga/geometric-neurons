@@ -68,8 +68,8 @@ def safe_digitize(x, bins: BinSpec):
     return inds, bin_edges
 
 
-def zscore(x: float, xs: Sequence[float], robust: bool):
-    """ zscore of x (scalar) relative to xs (population) """
+def zscore(x: float | np.ndarray[float], xs: Sequence[float], robust: bool):
+    """ zscore of x (scalars) relative to xs (population) """
     loc, scale = calc_loc_and_scale(xs, robust)
     z = (x - loc) / scale
     return z, loc, scale
@@ -193,7 +193,8 @@ def _lazy_calc_stat(x: np.ndarray, stat: str, mem: dict[str, float], **kwargs) -
     elif stat == 'std':
         mem[stat] = np.sqrt(_lazy_calc_stat(x, 'var', mem, **kwargs))
     elif stat == 'mad':
-        mem[stat] = 1.4826 * np.median(np.abs(x - _lazy_calc_stat(x, 'median', mem, **kwargs).reshape(x.shape)), axis=axis)
+        mem[stat] = 1.4826 * np.median(np.abs(x - np.median(x, **kwargs, keepdims=True)), **kwargs)
+        #mem[stat] = 1.4826 * np.median(np.abs(x - _lazy_calc_stat(x, 'median', mem, **kwargs).reshape(x.shape)), **kwargs)
     elif stat == 'se_mean':
         mem[stat] = _lazy_calc_stat(x, 'std', mem, **kwargs) / np.sqrt(max(1, len(x)))
     elif stat == 'se_median':

@@ -3,7 +3,14 @@ import numpy as np
 from common.utils.typings import *
 
 
+def rotate_points(*args, **kwargs):
+    return rotate(*args, **kwargs)
+
+
 def rotate(x: np.ndarray | float, y: np.ndarray | float, rad: float = None, deg: float = None, ax=None):
+    if hasattr(x, '__len__'):
+        x = np.asarray(x)
+        y = np.asarray(y)
     if deg is not None:
         assert rad is None
         rad = deg * np.pi / 180

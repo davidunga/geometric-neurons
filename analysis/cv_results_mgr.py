@@ -1,4 +1,5 @@
 import shutil
+import os
 from datetime import datetime
 import numpy as np
 import pandas as pd
@@ -12,35 +13,6 @@ from motorneural.datasets import get_datasets_specs
 from common.utils import dlutils
 import torch
 from common.metric_learning.embedding_models import LinearEmbedder
-from wandb_tools import WandbMgr, is_valid_wandb_state
-from shutil import move
-
-
-def validate_model_files(clear_bad: bool = False):
-    invalids_dir = paths.MODELS_DIR / 'invalid'
-    invalids_dir.mkdir(exist_ok=True)
-
-    wandb_mgr = WandbMgr()
-    all_run_names = wandb_mgr.get_run_names()
-    model_status = {model_file: 'noMatch' for model_file in get_model_files()}
-    for model_file in model_status:
-        model_name = Path(model_file).stem
-        for run_name in all_run_names:
-            if model_name in run_name:
-                model_status[model_file] = 'invalid'
-            if is_valid_wandb_state(wandb_mgr.get_state(run_name)):
-                model_status[model_file] = 'valid'
-                break
-
-    for model_file, status in model_status.items():
-        if clear_bad and status != 'valid':
-            move(model_file, str(invalids_dir))
-            status += "-> moved"
-        print(str(model_file), "-", status)
-
-    print("valids=", sum(s == 'valid' for s in model_status.values()))
-    print("invalids=", sum(s != 'valid' for s in model_status.values()))
-
 
 
 def get_model_and_config(model_file) -> tuple[LinearEmbedder, Config]:
@@ -230,27 +202,50 @@ def make_results_dfs(sort_agg_by: str = 'mean_auc_val') -> tuple[pd.DataFrame, p
 
 
 def refresh_results_file(sort_agg_by: str = 'mean_auc_val'):
-    results_file = paths.CV_DIR / "results.txt"
+    sort_by = 'auc_val'
+
     df, agg_df = make_results_dfs(sort_agg_by=sort_agg_by)
     if not len(df):
         return
 
+    paths.CV_DIR.mkdir(exist_ok=True, parents=True)
+
+    df = df.sort_values(by=sort_by, ascending=False, ignore_index=True)
     agg_df.rename(columns={col: _abbreviate(col) for col in agg_df}, inplace=True)
-    results_file.parent.mkdir(exist_ok=True, parents=True)
-
-    datasets_in_results = set(cfg['data']['trials']['name'] for cfg in df['cfg'])
     dataset_specs = get_datasets_specs()
-    info = ", ".join([k + ": total neurons:{total_neurons} {brain_sites}".format(**dataset_specs[k])
-                      for k in datasets_in_results])
+    dataset_names = ['all'] + list(dataset_specs.keys())
 
-    with results_file.open("w") as f:
-        f.write("Refresh time: " + str(pd.Timestamp.now()))
-        f.write(f"\n{info}")
-        f.write("\nSummary:\n")
-        f.write(agg_df.to_string())
-        f.write("\n\nCatalog:\n")
-        f.write(df.to_string())
-    print("Refreshed results file.")
+    for dataset_name in dataset_names:
+
+        if dataset_name != 'all':
+            results_file = paths.CV_DIR / f"results-{dataset_name}.txt"
+            agg_df_ = agg_df.loc[agg_df['trials.name'] == dataset_name, :]
+            df_ = df.loc[df['trials.name'] == dataset_name, :]
+        else:
+            results_file = paths.CV_DIR / "results.txt"
+            agg_df_ = agg_df
+            df_ = df
+
+        assert (len(agg_df_) == 0) == (len(df_) == 0)
+
+        if not len(df_):
+            if results_file.is_file():
+                os.remove(str(results_file))
+            continue
+
+        info = ", ".join([k + ": total neurons:{total_neurons} {brain_sites}".format(**dataset_specs[k])
+                          for k in set(df_['trials.name'])])
+
+        with results_file.open("w") as f:
+            f.write("Refresh time: " + str(pd.Timestamp.now()))
+            f.write(f"\n{info}")
+            f.write("\nSummary:\n")
+            f.write(agg_df_.to_string())
+            f.write("\n\nCatalog:\n")
+            f.write(f"Sorted by {sort_by}\n")
+            f.write(df_.to_string())
+
+    print("Refreshed results files.")
 
 
 def _abbreviate(s: str):
@@ -270,14 +265,15 @@ def _abbreviate(s: str):
     return abbrv
 
 
+def get_chosen_model_file(monkey: str) -> Path:
+    return make_model_file_path(Config.from_chosen(monkey), fold=0)
+
+
+def get_chosen_model_per_monkey() -> dict[str, Path]:
+    return {monkey: get_chosen_model_file(monkey) for monkey in ['RS', 'RJ']}
+
+
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    parser_validate = subparsers.add_parser("validate", help="Validate the model")
-    parser_validate.add_argument("--mvbad", action="store_true", help="Clear bad data", dest="clear_bad")
-
-    args = parser.parse_args()
-
-    if args.command == "validate":
-        validate_model_files(clear_bad=args.clear_bad)
+    print(get_chosen_model_file('RS'))
+    print(get_chosen_model_file('RJ'))
+    refresh_results_file()

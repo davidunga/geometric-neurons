@@ -2,25 +2,35 @@ import numpy as np
 from scipy.interpolate import interp1d
 from common.utils.typings import *
 from PIL import Image, ImageDraw
+from geometrik import utils
 
 
 def edge_lengths(X: NpPoints):
     return np.linalg.norm(np.diff(X, axis=0), axis=1)
 
 
-def cumm_arclen(X: NpPoints) -> NpVec[float]:
+def arclen(X: NpPoints) -> NpVec[float]:
     return np.r_[0, np.cumsum(edge_lengths(X))]
 
 
 def total_arclen(X: NpPoints) -> float:
-    return cumm_arclen(X)[-1]
+    return arclen(X)[-1]
 
 
-def uniform_resample(X: NpPoints, n: int, kind: str = 'linear') -> NpPoints:
-    s = cumm_arclen(X)
+def uniform_resample(X: NpPoints, n: int = None, kind: str = 'linear'):
+    if n is None: n = len(X)
+    s = arclen(X)
     s_new = np.linspace(0, s[-1], n)
     X_new = interp1d(x=s, y=X.T, kind=kind)(s_new).T
-    return X_new
+    return X_new, s_new
+
+
+
+def winding_angle(X: np.ndarray) -> np.ndarray[float]:
+    dX = np.diff(X, axis=0)
+    thetas = np.unwrap(np.arctan2(dX[:, 1], dX[:, 0]))
+    thetas = np.concatenate([thetas, [2 * thetas[-1] - thetas[-2]]])
+    return thetas
 
 
 def rasterize_paths(paths: Sequence[np.ndarray], image_wh, width: int = 1, reduce: str = 'mean', **kwargs):

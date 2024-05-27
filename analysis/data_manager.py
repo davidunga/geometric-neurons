@@ -32,6 +32,7 @@ class DataMgr:
         if self._segments: return self._segments
         segments = pickle.load(self.pkl_path(DataConfig.SEGMENTS))
         validate_data_slices(segments, same_len=True)
+        verbolize.inform(f"Loaded {len(segments)} segments")
         if self.persist:
             self._segments = segments
         return segments
