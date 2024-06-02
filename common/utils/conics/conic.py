@@ -18,7 +18,7 @@ def _unpack_points(pts) -> tuple[np.ndarray, np.ndarray]:
         return pts.T
 
 
-class ConicSection:
+class Conic:
 
     _kind_name: str = ''
 
@@ -27,6 +27,12 @@ class ConicSection:
         self.loc = loc
         self.ang = ang
         self._bounds = bounds
+
+    def to_json(self):
+        return {'m': list(self.m) if hasattr(self.m, '__len__') else self.m,
+                'loc': list(self.loc),
+                'ang': float(self.ang),
+                'bounds': list(self._bounds) if self._bounds is not None else 'null'}
 
     @property
     def kind(self):
@@ -162,7 +168,7 @@ class ConicSection:
         raise NotImplementedError
 
 
-def debug_draw(conic: ConicSection):
+def debug_draw(conic: Conic):
     conic.draw()
     pts = np.array([(1, -1), (-1.5, 2), (-1.5, 1)], float)
     plt.plot(*pts.T, 'ro')

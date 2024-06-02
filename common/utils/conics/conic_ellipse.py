@@ -1,13 +1,13 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from common.utils.conics import conic_coeffs
+from common.utils.conics import conic_coeffs, Conic
 from scipy.spatial.distance import cdist
 from common.utils import polytools
 from scipy.interpolate import interp1d
-from conic_section import ConicSection, debug_draw
 
 
-class ConicEllipse(ConicSection):
+
+class ConicEllipse(Conic):
 
     _kind_name = 'Ellipse'
 

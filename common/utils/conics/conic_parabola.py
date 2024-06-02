@@ -1,11 +1,10 @@
 import numpy as np
-from common.utils.conics import conic_coeffs
+from common.utils.conics import conic_coeffs, Conic
 from common.utils.linalg import rotate_points
 from scipy.optimize import minimize
-from conic_section import ConicSection, debug_draw
 
 
-class ConicParabola(ConicSection):
+class ConicParabola(Conic):
 
     _kind_name = 'Parabola'
 

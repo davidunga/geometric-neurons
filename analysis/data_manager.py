@@ -8,6 +8,8 @@ from common.utils.devtools import verbolize
 from common.utils.typings import *
 from motorneural.data import Segment, postprocess_data_slices, Trial, validate_data_slices
 from common.utils import hashtools
+import json
+from common.utils.conics import get_conic, Conic
 
 
 class DataMgr:
@@ -36,6 +38,15 @@ class DataMgr:
         if self.persist:
             self._segments = segments
         return segments
+
+    @verbolize()
+    def load_fitted_conics(self) -> tuple[list[Conic], pd.DataFrame]:
+        conics_file = paths.PROCESSED_DIR / (self.cfg.str(DataConfig.SEGMENTS) + '.CONICS.json')
+        items = json.load(conics_file.open('r'))
+        conics = [get_conic(**fit_result['conic']) for fit_result in items['conic_fits']]
+        scores_df = pd.DataFrame([{'seg_ix': fit_result['seg_ix'], ** fit_result['scores']}
+                                  for fit_result in items['conic_fits']])
+        return conics, scores_df
 
     @verbolize()
     def load_pairing(self) -> pd.DataFrame:

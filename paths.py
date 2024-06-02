@@ -14,3 +14,4 @@ GLOBAL_DATA_DIR = Path("~/data").expanduser()
 KEYS_DIR = Path('~/keys').expanduser()
 WANDB_ROOT = _output_root
 RUNNING_DIR = _project_root / "running"
+PROCESSED_DIR = _resources_root / "processed"

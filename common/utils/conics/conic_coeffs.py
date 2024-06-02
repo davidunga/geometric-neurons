@@ -1,6 +1,4 @@
-import matplotlib.pyplot as plt
 import numpy as np
-from common.utils.linalg import rotate_points
 
 
 class ConicTypeError(Exception):
@@ -11,12 +9,6 @@ def evaluate(coeffs, x: np.ndarray, y: np.ndarray):
     A, B, C, D, E, F = coeffs
     z = A * x ** 2 + B * x * y + C * y ** 2 + D * x + E * y + F
     return z
-
-
-def fit_lsqr(x, y):
-    D = np.vstack([x**2, x*y, y**2, x, y, np.ones_like(x)]).T
-    _, _, V = np.linalg.svd(D)
-    return V[-1, :]
 
 
 def rotation_theta(coeffs, relto: str = 'x'):
@@ -60,31 +52,3 @@ def scale(coeffs, sx: float, sy: float = None):
     sx, sy = 1 / sx, 1 / sy
     scales = [sx ** 2, sx * sy, sy ** 2, sx, sy, 1.]
     return tuple(c * s for c, s in zip(coeffs, scales))
-
-
-def fit_conic_parabola(pts, ang_min=0., ang_max=180.):
-    steps_per_search = 100
-    min_step_size = .01 * np.pi / 180
-
-    def _search(thetas):
-        errors = np.zeros_like(thetas, float)
-        params = np.zeros((len(thetas), 3), float)
-        for i, theta in enumerate(thetas):
-            x, y = rotate_points(*pts.T, rad=-theta)
-            params[i] = np.polyfit(x, y, deg=2)
-            errors[i] = np.sum((np.polyval(params[i], x) - y) ** 2)
-        i = np.argmin(errors)
-        return thetas[i], params[i]
-
-    thetas = np.radians(np.linspace(ang_min, ang_max, steps_per_search))
-    step_size = thetas[1] - thetas[0]
-    pfit, theta = None, None
-    while step_size > min_step_size:
-        theta, pfit = _search(thetas)
-        thetas = np.linspace(theta - step_size, theta + step_size, steps_per_search)
-        step_size = thetas[1] - thetas[0]
-
-    assert pfit is not None
-    A, D, F = pfit
-    coeffs = rotate((A, 0., 0., D, -1., F), theta)
-    return coeffs
