@@ -1,5 +1,7 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from common.utils.linalg import rotate_points
+
 
 class ConicTypeError(Exception):
     pass
@@ -60,27 +62,9 @@ def scale(coeffs, sx: float, sy: float = None):
     return tuple(c * s for c, s in zip(coeffs, scales))
 
 
-def get_strict_conic_type(coeffs) -> str:
-    _eps = np.finfo(float).eps
-    A, B, C, D, E, F = coeffs
-    d = B ** 2 - 4 * A * C
-    if np.abs(d) < _eps:
-        return 'p'
-    else:
-        return 'e' if d < 0 else 'h'
-
-
-def raise_strict_conic_type(coeffs, kinds):
-    if isinstance(kinds, str): kinds = (kinds,)
-    assert set(kinds).issubset(('e', 'p', 'h'))
-    strict_type = get_strict_conic_type(coeffs)
-    if strict_type not in kinds:
-        raise ConicTypeError(f"Conic is {strict_type}, not {kinds}")
-
-
 def fit_conic_parabola(pts, ang_min=0., ang_max=180.):
-    steps_per_search = 10
-    min_step_size = .25 * np.pi / 180
+    steps_per_search = 100
+    min_step_size = .01 * np.pi / 180
 
     def _search(thetas):
         errors = np.zeros_like(thetas, float)
@@ -94,11 +78,13 @@ def fit_conic_parabola(pts, ang_min=0., ang_max=180.):
 
     thetas = np.radians(np.linspace(ang_min, ang_max, steps_per_search))
     step_size = thetas[1] - thetas[0]
+    pfit, theta = None, None
     while step_size > min_step_size:
-        theta, params = _search(thetas)
+        theta, pfit = _search(thetas)
         thetas = np.linspace(theta - step_size, theta + step_size, steps_per_search)
         step_size = thetas[1] - thetas[0]
 
-    A, D, F = params
+    assert pfit is not None
+    A, D, F = pfit
     coeffs = rotate((A, 0., 0., D, -1., F), theta)
     return coeffs

@@ -1,9 +1,15 @@
 import numpy as np
 
 
-def to_str(x, f='2.3'):
+def get_float_format(f: int | float | str = '2.3'):
+    prefix = '.' if isinstance(f, int) else ''
+    suffix = '' if isinstance(f, str) and f.endswith('f') else 'f'
+    return f'{prefix}{f}{suffix}'
+
+
+def to_str(x, f: int | float | str = '2.3'):
     if isinstance(x, float):
-        return f"{x:{f + 'f'}}"
+        return f"{x:{get_float_format(f)}}"
     elif isinstance(x, (list, tuple, np.ndarray)):
         s = ', '.join([to_str(xx, f=f) for xx in x])
         return f'({s})' if isinstance(x, tuple) else f'[{s}]'

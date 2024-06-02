@@ -49,7 +49,7 @@ def get_approx_arc_properties(pts) -> dict:
         m *= -1
 
     center = pts[i0] + np.array(rotate_points(0, r, rad=theta))
-    props = {'r': r, 'center': center, 'm': m, 'theta': theta,
+    props = {'r': r, 'center': center, 'm': m, 'ang': theta * 180 / np.pi,
              'inflections_score': len(inflection_ixs) / len(pts),
              'vertex_ix': i0, 'start_ix': start, 'stop_ix': stop,
              'valid_arclen': s[stop] - s[start], 'total_arclen': s[-1],
@@ -69,14 +69,14 @@ def draw_arc_properties(pts, arc_props: dict = None):
     m = arc_props['m']
     center = arc_props['center']
     r = arc_props['r']
-    theta = arc_props['theta']
+    ang = arc_props['ang']
 
-    ts = np.linspace(-np.pi/2, np.pi/2, 100) + theta - np.pi / 2
+    ts = np.radians(ang + np.linspace(0, 180, 100))
     osc_circle_pts = center + r * np.c_[np.cos(ts), np.sin(ts)]
 
     xx = np.linspace(-r, r, 100)
     yy = m * xx ** 2
-    osc_parabola_pts = pts[i0] + np.stack(rotate_points(xx, yy, rad=theta), axis=1)
+    osc_parabola_pts = pts[i0] + np.stack(rotate_points(xx, yy, ang=ang), axis=1)
 
     plt.plot(*pts.T, 'k.')
     plt.plot(*pts[start: stop].T, 'r.')
