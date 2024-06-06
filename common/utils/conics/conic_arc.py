@@ -71,12 +71,12 @@ def draw_arc_properties(pts, arc_props: dict = None):
     r = arc_props['r']
     ang = arc_props['ang']
 
-    ts = np.radians(ang + np.linspace(0, 180, 100))
+    ts = np.radians(ang + np.linspace(0, -180, 100))
     osc_circle_pts = center + r * np.c_[np.cos(ts), np.sin(ts)]
 
     xx = np.linspace(-r, r, 100)
     yy = m * xx ** 2
-    osc_parabola_pts = pts[i0] + np.stack(rotate_points(xx, yy, ang=ang), axis=1)
+    osc_parabola_pts = pts[i0] + np.stack(rotate_points(xx, yy, deg=ang), axis=1)
 
     plt.plot(*pts.T, 'k.')
     plt.plot(*pts[start: stop].T, 'r.')

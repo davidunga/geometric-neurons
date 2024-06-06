@@ -3,115 +3,170 @@ import matplotlib.pyplot as plt
 from typing import Sequence
 from common.utils.conics import conic_coeffs, conic_arc
 from common.utils.conics import Conic, ConicParabola, ConicEllipse, get_conic
-from common.utils.linalg import rotate_points
+from common.utils.linalg import rotate_points, is_ccw
+from common.utils import strtools
+from common.utils.linalg import average_theta
 
 
-def eval_conic_fit(conic: Conic, pts: np.ndarray, normdist_thresh: float, refine: bool = False):
-    r2 = conic.arclen_scale_factor() ** 2
-    norm_dists2 = conic.squared_dists(pts, refine=refine)[0] / r2
-    inliers = norm_dists2 < normdist_thresh ** 2
-    inlier_count = int(np.sum(inliers))
-    mse = np.mean(norm_dists2)
-    scores = {'mse': mse,
-              'inlier_count': inlier_count,
-              'inlier_p': float(inlier_count) / len(pts)}
-    return scores, inliers, norm_dists2
+def parabola_to_ellipse(parabola: ConicParabola, e: float = .9999) -> ConicEllipse:
+    a = parabola.focus_dist() / (1 - e)
+    b = a * np.sqrt(1 - e ** 2)
+    dx, dy = rotate_points(a, 0, deg=parabola.ang - np.sign(parabola.m) * 90)
+    center = np.array([parabola.loc[0] - dx, parabola.loc[1] - dy])
+    ellipse = ConicEllipse(m=(a, b), loc=center, ang=parabola.ang + 90)
+    return ellipse
+
+
+from common.utils import polytools
+
+
+def dist_to_line(line, pt):
+    p1, p2 = line
+    vec = p2 - p1
+    return np.linalg.norm(np.cross(vec, line - pt)) / np.linalg.norm(vec)
+
+
+class ConicFitEvaluator:
+
+    def __init__(self, pts: np.ndarray, thresh: float = .05):
+        self.norm_factor2 = 1 / np.var(pts, axis=0).min()
+        self.thresh2 = thresh ** 2
+        self.pts = pts
+        self._compare_by = ['inl', 'xse']
+        self._metrics = {
+            'inl': {'higher_is_better': True, 'rtol': .0},
+            'inl_count': {'higher_is_better': True, 'rtol': .0},
+            'mse': {'higher_is_better': False, 'rtol': .001},
+            'xse': {'higher_is_better': False, 'rtol': .001},
+            '_e': {'higher_is_better': True, 'rtol': .0},
+        }
+
+    def eval(self, conic: Conic):
+        norm_dists2, nearest_t = conic.squared_dists(self.pts)
+        norm_dists2 *= self.norm_factor2
+        inliers = norm_dists2 < self.thresh2
+        inlier_count = int(np.sum(inliers))
+        mse = np.mean(norm_dists2)
+        xse = np.max(norm_dists2)
+        result = {
+            'mse': mse,
+            'xse': xse,
+            'inl': float(inlier_count) / len(self.pts),
+            'inl_count': inlier_count,
+            '_e': conic.eccentricity(),
+            '_t': nearest_t,
+            '_inl_mask': inliers,
+        }
+        result['str'] = 'mse={mse:.3f}, xse={xse:.3f}, inl={inl:.2f}'.format(**result)
+        return result
+
+    def is_better(self, s1: dict, s2: dict):
+        """ check if s1 score is better than s2 """
+        for metric in self._compare_by:
+            dff = s1[metric] - s2[metric]
+            avg = (s1[metric] + s2[metric]) / 2
+            if abs(dff) > abs(avg) * self._metrics[metric]['rtol']:
+                return self._metrics[metric]['higher_is_better'] == (dff > 0)
+        return False
 
 
 def fit_conic_ransac(pts: np.ndarray, fit_indexes: np.ndarray[int] = None,
-                     kinds: Sequence[str] = ('e', 'p'), inlier_p_thresh: float = .9,
-                     arc: bool = False, seed: int = 1, normdist_thresh: float = .05, n: int = 7,
-                     max_itrs: int = 1000, arc_ang: float = 20) -> tuple[Conic, dict]:
+                     inlier_p_thresh: float = .95, seed: int = 1, thresh: float = .05, n: int = 7,
+                     max_itrs: int = 500, kind: str = None, resample_factor: float = 1) -> tuple[Conic, dict]:
 
-    kinds = set(kinds)
-    assert kinds.issubset(('e', 'p'))
+    evaluator = ConicFitEvaluator(pts=pts, thresh=thresh)
 
-    inlier_count_thresh = inlier_p_thresh * len(pts)
+    bests = {}
 
-    def _calc_scores(conic: Conic, refine: bool = False):
-        return eval_conic_fit(conic, pts, normdist_thresh=normdist_thresh, refine=refine)[0]
+    def _evaluate(conic: Conic):
+        return evaluator.eval(conic)
 
-    def _is_better(s1, s2) -> bool:
-        """ check if s1 score is better than s2 """
-        if s1['inlier_count'] == s2['inlier_count']:
-            return s1['mse'] < s2['mse']
-        else:
-            return s1['inlier_count'] > s2['inlier_count']
+    def _process_conic(conic, sample):
+        new_best = False
+        fiteval = _evaluate(conic)
+        if conic.kind not in bests or evaluator.is_better(fiteval, bests[conic.kind]['eval']):
+            bests[conic.kind] = {'conic': conic, 'sample': sample, 'eval': fiteval}
+            new_best = True
+        return new_best
 
-    parabola_fit_kws = {}
-    if arc:
+    if resample_factor != 1:
         assert fit_indexes is None
-        arc_props = conic_arc.get_approx_arc_properties(pts)
-        fit_indexes = np.arange(arc_props['start_ix'], arc_props['stop_ix'])
-        parabola_fit_kws['ang_min'] = arc_props['ang'] - arc_ang
-        parabola_fit_kws['ang_max'] = arc_props['ang'] + arc_ang
+        pts_for_fitting = polytools.uniform_resample(pts, kind='cubic', n=int(.5 + resample_factor * len(pts)))[0]
+    else:
+        pts_for_fitting = pts
 
     if fit_indexes is None:
-        fit_indexes = np.arange(len(pts))
+        fit_indexes = np.arange(len(pts_for_fitting))
 
     rng = np.random.default_rng(seed)
-    best_scores = {'mse': np.inf, 'inlier_count': 0}
-    best_conic = None
-    best_sample = None
-    scores = None
+
+    conic = ConicParabola.from_coeffs(_fit_parabola_coeffs(*pts_for_fitting.T))
+    _process_conic(conic, sample=fit_indexes)
+
     for itr in range(max_itrs):
-        ii = rng.permutation(fit_indexes)[:n]
-        conic = get_conic(_fit_lsqr_coeffs(*pts[ii].T))
-        scores = _calc_scores(conic)
-        if _is_better(scores, best_scores):
-            best_scores = scores
-            best_conic = conic
-            best_sample = ii
-            if scores['inlier_count'] >= inlier_count_thresh:
-                break
+        sample = rng.permutation(fit_indexes)[:n]
+        conic = get_conic(_fit_lsqr_coeffs(*pts_for_fitting[sample].T))
+        new_best = _process_conic(conic, sample=sample)
+        if new_best and conic.kind != 'p':
+            conic = ConicParabola.from_coeffs(_fit_parabola_coeffs(*pts_for_fitting[sample].T))
+            _process_conic(conic, sample=sample)
+        if bests[conic.kind]['eval']['inl'] >= inlier_p_thresh:
+            print(itr)
+            break
 
-    conic = best_conic
-    scores = _calc_scores(conic, refine=True)
-    if 'p' in kinds and best_conic.kind != 'p':
-        ang0 = conic.ang - 90
-        ang_min, ang_max = ang0 - 10, ang0 + 10
-        parabola_coeffs = _fit_parabola_coeffs(*pts[best_sample].T, ang_min=ang_min, ang_max=ang_max)
-        parabola = ConicParabola.from_coeffs(parabola_coeffs)
-        parabola_scores = _calc_scores(parabola)
-        if _is_better(parabola_scores, scores) or kinds == {'p'}:
-            scores = parabola_scores
-            conic = parabola
+    if 'e' in bests:
+        sample = bests['e']['sample']
+        conic = ConicParabola.from_coeffs(_fit_parabola_coeffs(*pts_for_fitting[sample].T))
+        _process_conic(conic, sample=sample)
 
-    lb, ub = conic.nearest_t(pts[[0, -1]], refine=True)
-    if lb > ub:
-        if conic.kind == 'e':
-            lb = - (2 * np.pi - lb)
-        elif conic.kind == 'p':
-            lb, ub = ub, lb
-    conic._bounds = conic.t_to_p([lb, ub])
+    if kind is not None:
+        chosen_kind = kind
+    else:
+        kinds = list(bests)
+        chosen_kind = kinds[0]
+        for kind in kinds[1:]:
+            if evaluator.is_better(bests[kind]['eval'], bests[chosen_kind]['eval']):
+                chosen_kind = kind
 
-    return conic, scores
+    chosen_conic = bests[chosen_kind]['conic']
+    chosen_eval = bests[chosen_kind]['eval']
+    ordered_thetas = chosen_eval['_t'][[0, len(pts) // 2, -1]]
+
+    if chosen_conic.kind == 'e':
+        if abs(average_theta(ordered_thetas)) > np.pi / 2:
+            chosen_conic.ang += 180
+            ordered_thetas += np.pi
+        set_ellipse_bounds_from_trajectory(chosen_conic, ordered_thetas=ordered_thetas)
+        if chosen_conic.bounds[0] > 180:
+            chosen_conic._bounds = chosen_conic.bounds[0] - 360, chosen_conic.bounds[1] - 360
+    else:
+        assert chosen_conic.kind == 'p'
+        set_parabola_bounds_from_trajectory(chosen_conic, ordered_thetas=ordered_thetas)
+
+    scores = {k: v for k, v in chosen_eval.items() if not k.startswith('_')}
+    return chosen_conic, scores
 
 
-def _fit_parabola_coeffs(x, y, ang_min=0., ang_max=180., steps_per_search: int = 50):
-    min_step_size = .01 * np.pi / 180
+def _fit_parabola_coeffs(x, y, n_itrs: int = 3, refine_factor: int = 10, bounds=(0, 360)):
 
-    def _search(thetas):
+    def _brutforce_fit(thetas):
         errors = np.zeros_like(thetas, float)
         params = np.zeros((len(thetas), 3), float)
         for i, theta in enumerate(thetas):
             xx, yy = rotate_points(x, y, rad=-theta)
             params[i] = np.polyfit(xx, yy, deg=2)
-            errors[i] = np.sum((np.polyval(params[i], xx) - yy) ** 2)
-        i = np.argmin(errors)
-        return thetas[i], params[i]
+            errors[i] = np.sum(np.square(np.polyval(params[i], xx) - yy))
+        best_i = np.argmin(errors)
+        return thetas[best_i], params[best_i]
 
-    thetas = np.radians(np.linspace(ang_min, ang_max, steps_per_search))
-    step_size = thetas[1] - thetas[0]
-    pfit, theta = None, None
-    while step_size > min_step_size:
-        theta, pfit = _search(thetas)
-        thetas = np.linspace(theta - step_size, theta + step_size, steps_per_search)
-        step_size = thetas[1] - thetas[0]
+    thetas = np.radians(np.arange(*bounds))
+    for _ in range(n_itrs):
+        best_theta, best_params = _brutforce_fit(thetas)
+        step_sz = (thetas[-1] - thetas[0]) / (len(thetas) - 1)
+        thetas = np.linspace(best_theta - step_sz, best_theta + step_sz, refine_factor)
 
-    assert pfit is not None
-    A, D, F = pfit
-    coeffs = conic_coeffs.rotate((A, 0., 0., D, -1., F), theta)
+    A, D, F = best_params
+    coeffs = conic_coeffs.rotate((A, 0., 0., D, -1., F), best_theta)
     return coeffs
 
 
@@ -121,19 +176,44 @@ def _fit_lsqr_coeffs(x, y):
     return V[-1, :]
 
 
+def set_ellipse_bounds_from_trajectory(conic: ConicEllipse, pts=None, ordered_thetas=None):
+    if pts is not None:
+        assert ordered_thetas is None
+        ordered_thetas = conic.nearest_t(pts[[0, len(pts) // 2, -1]], refine=True)
+    t1, t2, t3 = np.mod(ordered_thetas, 2 * np.pi)
+    d = t3 - t1
+    if is_ccw([t1, t2, t3]):
+        d = d if d >= 0 else 2 * np.pi + d
+    else:
+        d = d - 2 * np.pi if d > 0 else d
+    conic._bounds = conic.t_to_p([t1, t1 + d])
+
+
+def set_parabola_bounds_from_trajectory(conic: ConicParabola, ordered_thetas=None):
+    conic._bounds = conic.t_to_p(ordered_thetas[[0, -1]])
+
+
 if __name__ == "__main__":
+
     rng = np.random.default_rng(1)
-    conic = ConicParabola(3, loc=(-1, 2), ang=-50, bounds=[-1, 2])
-    pts = conic.parametric_pts(n=100)
+    gt_conic = ConicParabola(-3, loc=(-1, 2), ang=50, bounds=[-4, 4])
+    pts = gt_conic.parametric_pts(n=100)
+    pts[:,1] *= -1
     pts += np.std(pts, axis=0) * .1 * rng.standard_normal(size=pts.shape)
-    normdist_thresh = .08
-    fitted_conic, _ = fit_conic_ransac(pts, arc=False, kinds=('e'), max_itrs=1500, normdist_thresh=normdist_thresh)
-    scores, inliers, _ = eval_conic_fit(fitted_conic, pts, normdist_thresh=normdist_thresh, refine=True)
-    plt.plot(*pts.T, 'k.', label='GT')
-    plt.plot(*pts[inliers].T, 'c.', label='IN')
-    print(conic)
-    print(fitted_conic)
-    plt.plot(*fitted_conic.parametric_pts().T, 'r.', label='Fit Inlier={inlier_p:2.3f} MSE={mse:2.5f}'.format(**scores))
+
+    evaluator = ConicFitEvaluator(pts)
+    fitted_conic = ConicParabola.from_coeffs(_fit_parabola_coeffs(*pts.T))
+    fitted_conic, _ = fit_conic_ransac(pts, kind='p')
+
+    ev = evaluator.eval(fitted_conic)
+    ii = ev['_inl_mask']
+    t = ev['_t']
+    plt.plot(*pts.T, 'k.', label='GT: ' + str(gt_conic))
+
+    plt.plot(*fitted_conic.parametric_pts().T, 'r.', label='Fit: ' + str(fitted_conic))
+    #plt.plot(*pts[ii].T, 'c.', label=None)
+    plt.plot(*fitted_conic.parametric_pts(t=t).T, 'c.', label='Fit: ' + str(fitted_conic))
+    plt.title("Eval: " + ev['str'])
     plt.axis('equal')
     plt.legend()
     plt.show()

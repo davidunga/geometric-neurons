@@ -25,6 +25,12 @@ def _validate_and_prep_conic_params(*, m, loc, ang, bounds=None):
     assert len(loc) == 2
     if bounds is not None:
         assert len(bounds) == 2
+        # lb, ub = bounds
+        # if ub - lb > 180:
+        #     delta = ub - lb
+        #     lb = ub
+        #     ub = lb + delta
+        #     bounds = lb, ub
         bounds = tuple(bounds)
     return m, loc, ang, bounds
 

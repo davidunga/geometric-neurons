@@ -3,6 +3,41 @@ import numpy as np
 from common.utils.typings import *
 
 
+_modulos = {'r': np.pi, 'd': 180}
+
+
+def _get_modulo(mod):
+    return _modulos.get(mod, mod)
+
+
+def _as_radians(rad=None, deg=None):
+    if deg is not None:
+        assert rad is None
+        return np.radians(deg)
+    else:
+        return rad
+
+
+def circdiff(t1, t2, mod: float | str = 'r'):
+    """ t2 - t1 """
+    m = _get_modulo(mod)
+    return (t2 - t1 + m) % (2 * m) - m
+
+
+def is_ccw(thetas):
+    assert len(thetas) == 3
+    (x1, x2, x3), (y1, y2, y3) = np.cos(thetas), np.sin(thetas)
+    det = (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)
+    return det > 0
+
+
+def average_theta(thetas):
+    s = np.sum(np.sin(thetas))
+    c = np.sum(np.cos(thetas))
+    avg = np.arctan2(s, c)
+    return avg
+
+
 def rotate_points(*args, **kwargs):
     return rotate(*args, **kwargs)
 

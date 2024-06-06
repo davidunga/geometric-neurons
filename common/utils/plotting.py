@@ -12,7 +12,10 @@ from matplotlib.patches import Ellipse
 from sklearn.covariance import MinCovDet
 from common.utils import gaussians
 
-def plot(xy, *args, **kwargs):
+_marks_markers = {0: '*', -1: 's'}
+
+
+def plot(xy, *args, marks='', **kwargs):
     if isinstance(xy, tuple):
         x, y = xy
     else:
@@ -23,7 +26,12 @@ def plot(xy, *args, **kwargs):
         else:
             assert xy.ndim == 2
             x, y = xy.T
-    plt.plot(x, y, *args, **kwargs)
+    p = plt.plot(x, y, *args, **kwargs)
+    color = p[0].get_color()
+    if marks:
+        for mark in marks.split(','):
+            i = int(mark)
+            plt.plot(x[i], y[i], color=color, marker=_marks_markers[i])
 
 
 def get_nice_colors() -> list[str]:

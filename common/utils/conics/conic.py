@@ -18,9 +18,12 @@ def _unpack_points(pts) -> tuple[np.ndarray, np.ndarray]:
         return pts.T
 
 
+_kind_names = {'e': 'Ellipse', 'p': 'Parabola'}
+
+
 class Conic:
 
-    _kind_name: str = ''
+    _kind: str = ''
 
     def __init__(self, m, loc, ang, bounds=None):
         self.m = m
@@ -34,13 +37,16 @@ class Conic:
                 'ang': float(self.ang),
                 'bounds': list(self._bounds) if self._bounds is not None else 'null'}
 
-    @property
-    def kind(self):
-        return self.kind_name[0].lower()
+    def get_standardized(self):
+        return type(self)(m=self.m, loc=(0, 0), ang=0, bounds=self._bounds)
 
     @property
-    def kind_name(self):
-        return self._kind_name
+    def kind(self) -> str:
+        return self._kind
+
+    @property
+    def kind_name(self) -> str:
+        return _kind_names[self._kind]
 
     @property
     def params(self):
@@ -48,7 +54,7 @@ class Conic:
 
     @property
     def xang(self):
-        return self.ang - 90 if self.kind == 'p' else self.ang
+        return self.ang + 90 if self.kind == 'p' else self.ang
 
     @property
     def unitvec(self):
@@ -59,6 +65,17 @@ class Conic:
         if self._bounds is None:
             self._bounds = self.default_bounds()
         return tuple(self._bounds)
+
+    def bounds_bias(self):
+        b1, b2 = self.arclen(p=np.abs(self.bounds))
+        if b1 < b2:
+            mn, mx = b1, b2
+            sgn = 1
+        else:
+            mn, mx = b2, b1
+            sgn = -1
+        abs_bias = (mx - mn) / max(mn, 1e-10)
+        return sgn * abs_bias
 
     def radcurv_at_vertex(self) -> float:
         return self.semi_latus()
@@ -88,11 +105,14 @@ class Conic:
         x, y = self.transform(self.nontransformed_parametric_pts(p=p, t=t, n=n))
         return np.c_[x, y]
 
+    def arclen(self, t=None, p=None):
+        raise NotImplementedError()
+
     def t_to_p(self, t):
-        return self._arclen_convert(t=t) / self.arclen_scale_factor()
+        raise NotImplementedError()
 
     def p_to_t(self, p):
-        return self._arclen_convert(s=p * self.arclen_scale_factor())
+        raise NotImplementedError()
 
     def default_bounds(self) -> tuple[float, float]:
         raise NotImplementedError()
@@ -161,12 +181,29 @@ class Conic:
         else:
             raise ValueError()
 
-    def squared_dists(self, pts, refine: bool = False) -> tuple[np.ndarray[float], np.ndarray[float]]:
+    def squared_dists(self, pts, **kwargs) -> tuple[np.ndarray[float], np.ndarray[float]]:
         raise NotImplementedError
 
-    def _arclen_convert(self, *, t=None, s=None) -> np.ndarray[float]:
-        raise NotImplementedError
 
+def _test_transform(conic: Conic):
+    from common.utils import plotting
+    axs = plotting.subplots(ncols=3)
+    for ax in axs:
+        ax.set_aspect('equal')
+    plt.suptitle("Transform Test\n" + str(conic))
+    pts = conic.parametric_pts()
+    plt.sca(axs[0])
+    plt.plot(*pts.T, 'k.')
+    plt.title('Original')
+    plt.sca(axs[1])
+    xx, yy = conic.inv_transform(pts)
+    plt.plot(xx, yy, 'r.')
+    plt.title('InvTransform')
+    plt.sca(axs[2])
+    xx, yy = conic.transform(np.c_[xx, yy])
+    plt.plot(xx, yy, 'b.')
+    plt.title('ReTransform')
+    plt.show()
 
 def debug_draw(conic: Conic):
     conic.draw()

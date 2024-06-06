@@ -1,15 +1,13 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from common.utils.conics import conic_coeffs, Conic
-from scipy.spatial.distance import cdist
 from common.utils import polytools
-from scipy.interpolate import interp1d
-
+from scipy.special import ellipeinc
 
 
 class ConicEllipse(Conic):
 
-    _kind_name = 'Ellipse'
+    _kind = 'e'
 
     @classmethod
     def from_coeffs(cls, coeffs):
@@ -64,40 +62,49 @@ class ConicEllipse(Conic):
         a = self.m[0]
         return np.c_[self.transform(([-a, a], [0, 0]))]
 
+    def t_to_p(self, t):
+        return np.asarray(t) * 180 / np.pi
+
+    def p_to_t(self, p):
+        return np.asarray(p) * np.pi / 180
+
     def default_bounds(self) -> tuple[float, float]:
-        plim = self.t_to_p(np.pi)
-        return -plim, plim
+        return -180, 180
 
-    def squared_dists(self, pts, refine: bool = False):
-        tt = np.linspace(0, 2 * np.pi, 180)
-        ellipse_pts = self.parametric_pts(t=tt)
-        squared_dists = cdist(pts, ellipse_pts, 'sqeuclidean')
-        mindist_ixs = np.argmin(squared_dists, axis=1)
-        squared_dists = squared_dists[np.arange(len(pts)), mindist_ixs]
-        t = tt[mindist_ixs]
-        if refine:
-            dthetas = np.linspace(-1, 1, 45) * np.pi / len(tt)
-            for i, (ti, pti) in enumerate(zip(t, pts)):
-                ellipse_pts = self.parametric_pts(t=ti + dthetas)
-                d = np.sum((pti - ellipse_pts) ** 2, axis=1)
-                mindist_ix = np.argmin(d)
-                squared_dists[i] = d[mindist_ix]
-                t[i] += dthetas[mindist_ix]
-        return squared_dists, t
-
-    def _arclen_convert(self, *, t=None, s=None):
-        tt = np.linspace(0, 2 * np.pi, 180)
+    def arclen(self, t=None, p=None):
+        if p is not None:
+            assert t is None
+            t = self.p_to_t(p)
         a, b = self.m
-        s_tt = polytools.arclen(np.c_[a * np.cos(tt), b * np.sin(tt)])
-        if t is not None:
-            assert s is None
-            return np.sign(t) * interp1d(tt, s_tt)(np.abs(t))
-        else:
-            return np.sign(s) * interp1d(s_tt, tt)(np.abs(s))
+        e2 = 1 - (a / b) ** 2
+        return a * ellipeinc(t, e2)
 
+    def squared_dists(self, pts, **kwargs):
+        a, b = self.m
+        xx, yy = self.inv_transform(pts)
+        tvecs = nearest_ellipse_tvec(a, b, np.c_[xx, yy])
+        t = np.arctan2(tvecs[:, 1], tvecs[:, 0])
+        dists2 = (a * np.cos(t) - xx) ** 2 + (b * np.sin(t) - yy) ** 2
+        return dists2, t
+
+
+def nearest_ellipse_tvec(a: float, b: float, pts: np.ndarray, n_itrs: int = 3):
+    s = (a ** 2 - b ** 2) * np.array([1 / a, -1 / b])
+    m = np.array([a, b])
+    sgn = np.sign(pts)
+    pts = np.abs(pts)
+    t = np.zeros_like(pts, float) + .707
+    for _ in range(n_itrs):
+        e = s * np.power(t, 3)
+        r = m * t - e
+        q = pts - e
+        rq = np.hypot(*r.T) / np.hypot(*q.T)
+        t = np.clip((e + q * rq[:, None]) / m, 0, 1)
+        t /= np.hypot(*t.T)[:, None]
+    return t * sgn
 
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    debug_draw(ConicEllipse((2, 1), (0, 0), 20))
-    plt.show()
+    from common.utils.conics.conic import _test_transform
+    _test_transform(ConicEllipse((2, 1), (0, 0), 20))

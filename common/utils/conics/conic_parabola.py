@@ -6,7 +6,7 @@ from scipy.optimize import minimize
 
 class ConicParabola(Conic):
 
-    _kind_name = 'Parabola'
+    _kind = 'p'
 
     @classmethod
     def from_coeffs(cls, coeffs):
@@ -45,11 +45,24 @@ class ConicParabola(Conic):
     def vertex_pts(self) -> np.ndarray:
         return np.array(self.loc, float, ndmin=2)
 
-    def default_bounds(self) -> tuple[float, float]:
-        plim = self.t_to_p(2)
-        return -plim, plim
+    def t_to_p(self, t):
+        return t / self.semi_latus()
 
-    def squared_dists(self, pts, refine: bool = False) -> tuple[np.ndarray[float], np.ndarray[float]]:
+    def p_to_t(self, p):
+        return p * self.semi_latus()
+
+    def default_bounds(self) -> tuple[float, float]:
+        return -2, 2
+
+    def arclen(self, t=None, p=None):
+        if p is not None:
+            assert t is None
+            t = self.p_to_t(p)
+        term1 = (t / 2) * np.sqrt(1 + 4 * self.m ** 2 * t ** 2)
+        term2 = (1 / (4 * self.m)) * np.arcsinh(2 * self.m * t)
+        return term1 + term2
+
+    def squared_dists(self, pts, **kwargs) -> tuple[np.ndarray[float], np.ndarray[float]]:
         xx, yy = self.inv_transform(pts)
         t = np.zeros(len(pts), float)
         squared_dists = np.zeros(len(pts), float)
@@ -61,28 +74,9 @@ class ConicParabola(Conic):
             squared_dists[i] = dists2[mindist_ix].real
         return squared_dists, t
 
-    def _arclen_convert(self, *, t=None, s=None) -> np.ndarray[float]:
-        ff = 4 * abs(self.m)
-        f = 1 / ff
-        f_log_ff = f * np.log(ff)
-
-        def _t_to_s(t):
-            h = .5 * t
-            q = np.sqrt(f ** 2 + h ** 2)
-            return h * q * ff + np.log(h + q) * f + f_log_ff
-
-        if s is None:
-            return _t_to_s(np.asarray(t))
-
-        assert t is None
-        sgn = np.sign(s)
-        s = np.abs(s)
-        res = minimize(fun=lambda x: np.sum((s - _t_to_s(x)) ** 2), x0=s, bounds=[(0, s_) for s_ in s])
-        return sgn * res.x
-
-
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    debug_draw(ConicParabola(3, (0, 0), 0))
-    plt.show()
+    from common.utils.conics.conic import _test_transform
+    _test_transform(ConicParabola(3, (-1, 2), 20))
+    #plt.show()
