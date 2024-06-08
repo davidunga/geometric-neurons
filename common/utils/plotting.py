@@ -120,6 +120,18 @@ def remove_inner_labels(axs, keep_legend: tuple | str = (0, 0)):
 
 
 def set_outter_labels(axs, x: str | list = None, y: str | list = None, t=None):
+    if isinstance(axs, dict):
+        i0 = y[0]
+        j0 = x[0] if x is not None else t[0]
+        for i in y:
+            axs[(i, j0)].set_ylabel(i)
+        if x is not None:
+            for j in x:
+                axs[(i0, j)].set_xlabel(j)
+        else:
+            for j in t:
+                axs[(i0, j)].set_title(j)
+        return
     if x is not None:
         for ax, label in zip(axs[-1, :].flatten(), x):
             ax.set_xlabel(label)
