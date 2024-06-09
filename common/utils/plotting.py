@@ -13,6 +13,12 @@ from sklearn.covariance import MinCovDet
 from common.utils import gaussians
 
 _marks_markers = {0: '*', -1: 's'}
+_nice_colors = [
+    'DodgerBlue', 'HotPink', 'LimeGreen', 'Orange', 'Crimson', 'SlateBlue',
+    'Gold', 'MediumPurple', 'Tomato', 'SpringGreen', 'RoyalBlue', 'Orchid',
+    'Coral', 'Turquoise', 'Magenta', 'DarkOrange', 'YellowGreen', 'SteelBlue',
+    'DeepPink', 'Chocolate', 'LightSeaGreen', 'Navy', 'MediumSeaGreen', 'FireBrick'
+]
 
 
 def plot(xy, *args, marks='', **kwargs):
@@ -34,8 +40,10 @@ def plot(xy, *args, marks='', **kwargs):
             plt.plot(x[i], y[i], color=color, marker=_marks_markers[i])
 
 
-def get_nice_colors() -> list[str]:
-    return ['DodgerBlue', 'HotPink', 'LimeGreen', 'Orange', 'Crimson', 'SlateBlue']
+def get_nice_colors(names=None) -> dict[str, str] | list[str]:
+    if names is not None:
+        return dict(zip(names, _nice_colors))
+    return list(_nice_colors)
 
 
 def set_axis_equal(ax='gca'):
@@ -270,7 +278,8 @@ def make_split_grid(nrows: int):
     return small_axs, big_ax
 
 
-def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2, figsize=(10, 6), **kwargs):
+def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2, figsize=(10, 6),
+             aspect: str = 'equal', **kwargs):
     assert ndim in (2, 3)
     sns.set_style('darkgrid')
     if ndim == 3:
@@ -279,6 +288,9 @@ def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2, figsize=(10, 6), **k
     fig, axs = plt.subplots(figsize=figsize, nrows=nrows, ncols=ncols,  **kwargs)
     if not hasattr(axs, '__len__'):
         axs = np.array([axs])
+    if aspect is not None:
+        for ax in axs.flatten():
+            ax.set_aspect(aspect)
     return axs
 
 

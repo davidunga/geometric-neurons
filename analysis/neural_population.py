@@ -21,6 +21,12 @@ class NEURAL_POP(Enum):
     def is_(self, other) -> bool:
         return self == other or NEURAL_POP.FULL in (self, other)
 
+    def __lt__(self, other):
+        if not isinstance(other, NEURAL_POP):
+            return NotImplemented
+        order = {NEURAL_POP.MINORITY: 0, NEURAL_POP.MAJORITY: 1, NEURAL_POP.FULL: 2}
+        return order[self] < order[other]
+
 
 class NeuralPopulation:
 

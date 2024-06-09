@@ -68,6 +68,16 @@ def safe_digitize(x, bins: BinSpec):
     return inds, bin_edges
 
 
+def convert_group_dict_to_labels(group_ixs: dict, n: int, keys=None, start_label: int = 1) -> np.ndarray:
+    """ make labels array of length n, from mapping group_name -> index list """
+    labels = np.zeros(n, int)
+    if keys is None:
+        keys = group_ixs.keys()
+    for label, key in enumerate(keys, start=start_label):
+        labels[group_ixs[key]] = label
+    return labels
+
+
 def zscore(x: float | np.ndarray[float], xs: Sequence[float], robust: bool):
     """ zscore of x (scalars) relative to xs (population) """
     loc, scale = calc_loc_and_scale(xs, robust)
