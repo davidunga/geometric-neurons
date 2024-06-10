@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from data_manager import DataMgr
 import cv_results_mgr
-from common.utils.shapes_specs import ShapeSpec
+import pandas as pd
 from neural_population import NeuralPopulation, NEURAL_POP
 from common.utils import plotting
 import seaborn as sns
@@ -15,7 +15,7 @@ def draw_projections(projs: list[tuple], ixs_of_shape: dict, density_type: str =
     methods = sorted(set(proj[1] for proj in projs))
     colors = plotting.get_nice_colors(ixs_of_shape)
 
-    axs = plotting.named_subplots(cols=pop_names, rows=methods)
+    axs = plotting.named_subplots(cols=pop_names, rows=methods, eq=True)
     plotting.set_outter_labels(axs, t=pop_names, y=methods)
     for (pop_name, method, pc_vecs, score) in projs:
         ax = axs[(method, pop_name)]
@@ -26,11 +26,10 @@ def draw_projections(projs: list[tuple], ixs_of_shape: dict, density_type: str =
             elif density_type == 'kde':
                 sns.kdeplot(x=pc_vecs[seg_ixs, 0], y=pc_vecs[seg_ixs, 1], ax=ax, color=color, fill=False)
             ax.scatter(*pc_vecs[seg_ixs].T, alpha=.5, label=shape, color=color)
-        plotting.set_axis_equal(ax)
         ax.legend()
 
 
-def draw_shape_embeddings(model_file, n: int = 10, n_to_draw: int = None):
+def draw_shape_embeddings(model_file, n: int = 15, n_to_draw: int = None):
 
     shape_specs = segment_shapes_tools.get_chosen_shape_specs()
     print("Using Specs:")
@@ -52,25 +51,39 @@ def draw_shape_embeddings(model_file, n: int = 10, n_to_draw: int = None):
     projs = segment_processing.compute_projections(model, input_vecs, neural_pop, groups=ixs_of_shape, n_pcs=2,
                                                    pop_names=[NEURAL_POP.MAJORITY, NEURAL_POP.MINORITY])
 
+    colors = plotting.get_nice_colors(ixs_of_shape)
+
     if n_to_draw is not None:
         for shape_name, ixs in ixs_of_shape.items():
+            if len(ixs) < n_to_draw:
+                continue
             x = input_vecs[ixs]
-            mu = x.mean(axis=0)
-            dists = np.sum((x - mu) ** 2, axis=1)
+            dists = np.sum((x - x.mean(axis=0)) ** 2, axis=1)
             ixs_of_shape[shape_name] = [ixs[i] for i in np.argsort(dists)[:n_to_draw]]
 
-    axs = plotting.named_subplots(cols=ixs_of_shape)
-    colors = plotting.get_nice_colors(ixs_of_shape)
+    axs = plotting.named_subplots(cols=ixs_of_shape, eq=True)
     for name, ixs in ixs_of_shape.items():
         pts = conics[ixs[2]].get_standardized().parametric_pts()
         pts /= np.std(pts, axis=0)
         axs[name].plot(*pts.T, color=colors[name])
         axs[name].set_title(name)
-        axs[name].set_aspect('equal')
     plt.suptitle(data_mgr.cfg.trials.name + " - EXAMPLE SHAPES")
 
     draw_projections(projs, ixs_of_shape, density_type='kde')
     plt.suptitle(data_mgr.cfg.trials.name + " - PROJECTIONS")
+
+    data = {'Speed': [], 'Acceleration': [], 'Shape': []}
+    for shape, seg_ixs in ixs_of_shape.items():
+        data['Speed'] += [segments[i].kin['EuSpd'].mean() for i in seg_ixs]
+        data['Acceleration'] += [segments[i].kin['EuAcc'].mean() for i in seg_ixs]
+        data['Shape'] += [shape] * len(seg_ixs)
+    data = pd.DataFrame(data)
+
+    params = [col for col in data.columns if col != 'Shape']
+    axs = plotting.named_subplots(rows=params)
+    plt.suptitle(data_mgr.cfg.trials.name + " - Euclidean Variables")
+    for param in params:
+        sns.kdeplot(data=data, x=param, ax=axs[param], hue='Shape', common_norm=False, palette=colors, fill=True)
 
 
 if __name__ == "__main__":

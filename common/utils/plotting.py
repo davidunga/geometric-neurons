@@ -278,8 +278,7 @@ def make_split_grid(nrows: int):
     return small_axs, big_ax
 
 
-def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2, figsize=(10, 6),
-             aspect: str = 'equal', **kwargs):
+def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2, figsize=(10, 6), eq: bool = False, **kwargs):
     assert ndim in (2, 3)
     sns.set_style('darkgrid')
     if ndim == 3:
@@ -288,9 +287,9 @@ def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2, figsize=(10, 6),
     fig, axs = plt.subplots(figsize=figsize, nrows=nrows, ncols=ncols,  **kwargs)
     if not hasattr(axs, '__len__'):
         axs = np.array([axs])
-    if aspect is not None:
+    if eq:
         for ax in axs.flatten():
-            ax.set_aspect(aspect)
+            ax.set_aspect('equal')
     return axs
 
 

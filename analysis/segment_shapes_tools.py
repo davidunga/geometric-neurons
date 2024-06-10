@@ -33,9 +33,10 @@ def get_valid_conic_ixs(scores_df: pd.DataFrame) -> list[int]:
 
 
 def match_conics_to_specs(conics: list[Conic], segment_labels: np.ndarray,
-                          shape_specs: dict[str, ShapeSpec], n: int = 50) -> dict[str, list[int]]:
+                          shape_specs: dict[str, ShapeSpec], n: int = 50,
+                          dist_thresh: float = float('inf')) -> dict[str, list[int]]:
 
-    assert segment_labels.max() == n - 1
+    assert segment_labels.max() == n
     valid_ixs = np.nonzero(segment_labels)[0]
     segment_labels = segment_labels[valid_ixs]
 
@@ -47,15 +48,19 @@ def match_conics_to_specs(conics: list[Conic], segment_labels: np.ndarray,
             dists2[i, j] = spec.dist2(conic_spec)
 
     ixs_of_shape = {spec_name: [] for spec_name in shape_specs}
-    dists_for_dbg = {spec_name: [] for spec_name in shape_specs}
-    for stratify_label in range(1, n):
+    dists_of_shape = {spec_name: [] for spec_name in shape_specs}
+    for stratify_label in range(1, n + 1):
         label_ixs = np.nonzero(segment_labels == stratify_label)[0]
         for i, (name, spec) in enumerate(shape_specs.items()):
             j = label_ixs[np.argmin(dists2[i][label_ixs])]
-            if np.isfinite(dists2[i, j]) and dists2[i, j] < 250000:
-                dists_for_dbg[name].append(dists2[i, j])
+            if dists2[i, j] < dist_thresh ** 2:
+                dists_of_shape[name].append(dists2[i, j] ** .5)
                 ixs_of_shape[name].append(valid_ixs[j])
                 dists2[:, j] = np.inf
+
+    for shape_name, shape_dists in dists_of_shape.items():
+        print(f"{shape_name}: count={len(shape_dists)}, "
+              f"dists avg={np.mean(shape_dists):2.1f} sd={np.std(shape_dists):2.1f}")
 
     return ixs_of_shape
 

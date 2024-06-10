@@ -17,7 +17,7 @@ def digitize_segments(segments: list[Segment], n: int, by: str = 'EuSpd',
         include_ixs = np.sort(include_ixs)
     values = [reduce_fun(segments[i][by]) for i in include_ixs]
     labels = np.zeros(len(segments), int)
-    labels[include_ixs] = stats.safe_digitize(values, stats.BinSpec(n, 'p'))[0]
+    labels[include_ixs] = stats.safe_digitize(values, stats.BinSpec(n, 'p'))[0] + 1
     return labels
 
 
