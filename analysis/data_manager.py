@@ -10,6 +10,7 @@ from motorneural.data import Segment, postprocess_data_slices, Trial, validate_d
 from common.utils import hashtools
 import json
 from common.utils.conics import get_conic, Conic
+from analysis.costume_dataframes.pairs_df_funcs import uniform_sample_pairs
 
 
 class DataMgr:
@@ -49,7 +50,7 @@ class DataMgr:
         return conics, scores_df
 
     @verbolize()
-    def load_pairing(self) -> pd.DataFrame:
+    def load_pairing(self, n_pairs: int = None) -> pd.DataFrame:
         """
         Returns:
             DataFrame
@@ -101,6 +102,10 @@ class DataMgr:
 
         pairs = pairs.loc[is_valid]
         pairs['isSame'] = is_same
+
+        if n_pairs is not None:
+            ixs = uniform_sample_pairs(pairs_df=pairs, max_n_pairs=n_pairs)
+            pairs = pairs.iloc[ixs]
 
         pairs.attrs.update({'num_segments': num_segments,
                             'num_pairs': num_pairs})

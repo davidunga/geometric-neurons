@@ -367,6 +367,14 @@ def merge_figures():
     plt.show()
 
 
+def set_labels(x: str | list[str] = None, y: str | list[str] = None, t: str | list[str] = None, ax='gca'):
+    def _parse(s): return '\n'.join(s) if isinstance(s, list) else s
+    ax = get_ax(ax)
+    if x: ax.set_xlabel(_parse(x))
+    if y: ax.set_ylabel(_parse(y))
+    if t: ax.set_title(_parse(t))
+
+
 def prep_roc_axis(ax=None):
     if ax is None:
         ax = subplots()[0]

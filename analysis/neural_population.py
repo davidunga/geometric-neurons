@@ -1,8 +1,11 @@
+import json
+from common.utils import dictools
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
-import torch.nn
+from sklearn.metrics import roc_auc_score
+from common.utils import sigproc
 from data_manager import DataMgr
 from common.utils.typings import *
 import cv_results_mgr
@@ -11,6 +14,13 @@ from common.utils import dlutils
 from scipy.spatial.distance import squareform, pdist
 from enum import Enum
 from common.utils.randtool import Rnd
+from common.metric_learning import embedding_eval
+from common.utils import strtools
+import paths
+
+
+def get_weights_file(model_file) -> Path:
+    return paths.PROCESSED_DIR / (Path(model_file).stem + '.WEIGHTS.json')
 
 
 class NEURAL_POP(Enum):
@@ -37,9 +47,15 @@ class NeuralPopulation:
         self._weight = dict(zip(self.data['neuron'], self.data['weight']))
 
     @classmethod
-    def from_model(cls, model_file):
-        cls_ = get_neural_population(model_file)
+    def from_model(cls, model_file, weight_by: str = None):
+        if weight_by is None: weight_by = 'svd_avg'
+        cls_ = get_neural_population(model_file, weight_by=weight_by)
         return cls(data=cls_.data, input_neuron_names=cls_.input_neuron_names)
+
+    def __str__(self):
+        s = strtools.parts(MINORITY=len(self.neurons(NEURAL_POP.MINORITY)),
+                           MAJORITY=len(self.neurons(NEURAL_POP.MAJORITY)))
+        return f"NeuralPop {s}"
 
     @property
     def population(self) -> dict[str, NEURAL_POP]:
@@ -117,52 +133,79 @@ class NeuralPopulation:
         plt.xlabel("Neuron Index")
 
 
-def get_neural_population(model_file) -> NeuralPopulation:
+def calc_and_save_neural_weights(model_file, seed: int = 1):
+    max_n_pairs = 100_000
 
-    # -----
-    max_n_samples = 1000
-    squared_dist = True
-    rnd = Rnd(seed=1)
-    # -----
+    print("Computing neural weights for " + str(model_file))
 
     model, cfg = cv_results_mgr.get_model_and_config(model_file)
     data_mgr = DataMgr(cfg.data)
 
+    pairs_df = data_mgr.load_pairing(n_pairs=max_n_pairs)
+    is_same = pairs_df['isSame'].to_numpy(dtype=int)
+
     input_vecs, inputs_meta = data_mgr.get_inputs()
-    input_vecs = rnd.subset(input_vecs, min(max_n_samples, len(input_vecs)))
+    x0 = dlutils.safe_predict(model, input_vecs)
 
     input_neuron_names = np.array(inputs_meta['input_neuron_names'])
     neuron_names = sorted(set(input_neuron_names))
 
-    neuron_exclude_masks = ~np.stack([input_neuron_names == neuron for neuron in neuron_names], axis=0)
-    dists = np.zeros((len(neuron_names), len(input_vecs)), float)
-    for sample_ix, input_vec in enumerate(input_vecs):
-        x0 = dlutils.safe_predict(model, input_vec)
-        for neuron_ix, neuron in enumerate(neuron_names):
-            input_without_neuron = input_vec * neuron_exclude_masks[neuron_ix]
-            x = dlutils.safe_predict(model, input_without_neuron)
-            dists[neuron_ix, sample_ix] = np.sum((x - x0) ** 2)
+    E = list(model.parameters())[0].cpu().detach().numpy().copy()
+    U, S, Vt = np.linalg.svd(E, full_matrices=False)
+    svd_square_loadings = np.sum(np.square(Vt.T) * np.square(S), axis=1)
 
-    weights = np.mean(dists, axis=1) if squared_dist else np.mean(np.sqrt(dists), axis=1)
-    data = pd.DataFrame({'neuron': neuron_names, 'weight': weights, 'population': NEURAL_POP.FULL})
+    def _calc_auc_for_embedding(x_) -> float:
+        embedded_dists = -embedding_eval.pairs_dists(x_, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
+        return roc_auc_score(y_true=is_same, y_score=embedded_dists)
+
+    full_auc = _calc_auc_for_embedding(x0)
+
+    weight_items = []
+    for neuron in neuron_names:
+        print("Neuron", neuron)
+        neuron_mask = input_neuron_names == neuron
+        vecs = input_vecs.copy()
+        vecs[:, neuron_mask] = .0
+        x = dlutils.safe_predict(model, vecs)
+        weight_items.append({
+            'neuron': neuron,
+            'auc': (full_auc - _calc_auc_for_embedding(x)) / full_auc,
+            'dist': np.sum((x - x0) ** 2, axis=1).mean(),
+            'svd_max1': np.max(svd_square_loadings[neuron_mask] ** .5),
+            'svd_avg1': np.mean(svd_square_loadings[neuron_mask] ** .5),
+            'svd_max': np.max(svd_square_loadings[neuron_mask]),
+            'svd_avg': np.mean(svd_square_loadings[neuron_mask])
+        })
+
+    items = dictools.to_json({'input_neuron_names': input_neuron_names, 'weights': weight_items})
+
+    weights_file = get_weights_file(model_file)
+    json.dump(items, weights_file.open('w'))
+    print("Saved to " + str(weights_file))
+
+
+def get_neural_population(model_file, weight_by: str) -> NeuralPopulation:
+    items = json.load(get_weights_file(model_file).open('r'))
+    input_neuron_names = np.array(items['input_neuron_names'])
+    data = pd.DataFrame(items['weights']).rename({weight_by: 'weight'}, axis=1).loc[:, ['neuron', 'weight']]
+    data['population'] = NEURAL_POP.FULL
     neural_pop = NeuralPopulation(data=data, input_neuron_names=input_neuron_names)
     neural_pop = cluster_populations_by_weights(neural_pop)
-
     return neural_pop
 
 
-def cluster_populations_by_weights(neural_pop: NeuralPopulation) -> NeuralPopulation:
+def cluster_populations_by_weights(neural_pop: NeuralPopulation, method: str = 'otsu',
+                                   add_neighbors: bool = False) -> NeuralPopulation:
 
-    # ----
-    inliers = stats.Inliers('iqr')  # inlier selection method
-    add_neighbors = False  # inliers whose nearest neighbor is an outlier are converted to outliers
-    # ----
+    neuron_weight = neural_pop.data['weight'].to_numpy(dtype=float) ** 2
 
-    neuron_weight = neural_pop.data['weight'].to_numpy(dtype=float)
-    outliers_mask = inliers.is_outlier(neuron_weight)
+    if method == 'otsu':
+        outliers_mask = neuron_weight > sigproc.otsu_threshold(neuron_weight)
+    else:
+        outliers_mask = stats.Inliers(method).is_outlier(neuron_weight)
 
-    assert neuron_weight[outliers_mask].min() > neuron_weight[~outliers_mask].max(), \
-        "Minority population score is not strictly greater than majority's"
+    # assert neuron_weight[outliers_mask].min() > neuron_weight[~outliers_mask].max(), \
+    #     "Minority population score is not strictly greater than majority's"
 
     if add_neighbors:
         dists = squareform(pdist(neuron_weight.reshape(-1, 1), 'seuclidean'))
@@ -173,13 +216,18 @@ def cluster_populations_by_weights(neural_pop: NeuralPopulation) -> NeuralPopula
     data = neural_pop.data.copy()
     data.loc[~outliers_mask, 'population'] = NEURAL_POP.MAJORITY
     data.loc[outliers_mask, 'population'] = NEURAL_POP.MINORITY
+    #data.sort_values(by='weight', ascending=False, inplace=True, ignore_index=True)
     ret = NeuralPopulation(data=data, input_neuron_names=neural_pop.input_neuron_names)
     return ret
 
 
 if __name__ == "__main__":
     for monkey, file in cv_results_mgr.get_chosen_model_per_monkey().items():
-        pop = get_neural_population(file)
-        pop.draw()
-        plt.title("Contribution of Neurons to Embedded Representation\n" + monkey)
+        weight_bys = ['svd_avg', 'svd_max', 'auc', 'svd_avg1', 'svd_max1']
+        #calc_and_save_neural_weights(file)
+        for by in weight_bys:
+            pop = get_neural_population(file, weight_by=by)
+            pop.draw()
+            plt.title(monkey + " " + by + "\n" + str(pop))
+        #plt.title("Contribution of Neurons to Embedded Representation\n" + monkey)
     plt.show()

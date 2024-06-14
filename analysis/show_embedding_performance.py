@@ -27,50 +27,50 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.preprocessing import LabelEncoder
 from common.utils import conics
 from common.utils import polytools
+from analysis.costume_dataframes import pairs_df_funcs
 from sklearn.metrics import roc_curve, roc_auc_score
 import embedtools
 
 
-def draw_embedding_vs_sameness_ROC(model_file, shuff: bool = False, nullify_pop: NEURAL_POP = None, seed: int = 1):
+def draw_embedding_vs_sameness_ROC(model_file, pop_names: list[NEURAL_POP],
+                                   shuff: bool = False, pop_weight_bys: list[str] = None, seed: int = 1):
     max_n_pairs = 100_000
-    rnd = Rnd(seed)
+    if pop_weight_bys is None:
+        pop_weight_bys = ['svd_avg']
+    elif isinstance(pop_weight_bys, str):
+        pop_weight_bys = [pop_weight_bys]
 
     model, cfg = cv_results_mgr.get_model_and_config(model_file)
     data_mgr = DataMgr(cfg.data)
-    pairs_df = data_mgr.load_pairing()
+    pairs_df = data_mgr.load_pairing(n_pairs=max_n_pairs)
 
-    same_ixs = np.nonzero(pairs_df['isSame'].to_numpy())[0]
-    notSame_ixs = np.nonzero(~pairs_df['isSame'].to_numpy())[0]
-    n = min([max_n_pairs // 2, len(same_ixs), len(notSame_ixs)])
-
-    if len(same_ixs) > n:
-        same_ixs = rnd.subset(same_ixs, n)
-    if len(notSame_ixs) > n:
-        notSame_ixs = rnd.subset(notSame_ixs, n)
-
-    pairs_df = pairs_df.iloc[np.r_[same_ixs, notSame_ixs]]
-    is_same = pairs_df['isSame'].to_numpy(dtype=int)
-    assert len(pairs_df) <= max_n_pairs
-    assert abs(is_same.sum() - len(is_same) / 2) <= 1
+    pairs_df_funcs.report_segment_uniformity(pairs_df)
+    pairs_df_funcs.report_sameness_part(pairs_df, raise_unbalanced=True)
 
     vecs, _ = data_mgr.get_inputs()
+    embed_types = ['YES']
+    axs = plotting.named_subplots(rows=pop_weight_bys, cols=pop_names)
+    for pop_weight_by in pop_weight_bys:
+        neural_pop = NeuralPopulation.from_model(model_file, weight_by=pop_weight_by)
+        for pop_name in pop_names:
+            pop_vecs = vecs.copy()
+            if pop_name != NEURAL_POP.FULL:
+                pop_vecs[:, ~neural_pop.inputs_mask(pop=pop_name)] = .0
+            embeddings = embedtools.prep_embeddings(model, pop_vecs, shuff=shuff, seed=seed)
+            ax = axs[(pop_weight_by, pop_name)]
+            plotting.prep_roc_axis(ax=ax)
+            for embed_type, embedded_vecs in embeddings.items():
+                embedded_dists = -embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
+                fpr, tpr, _ = roc_curve(y_true=is_same, y_score=embedded_dists)
+                auc = roc_auc_score(y_true=is_same, y_score=embedded_dists)
+                ax.plot(fpr, tpr, label=f'Embed={embed_type}: auc={auc:2.2f}')
+            ax.legend()
+    plotting.set_outter_labels(axs, t=pop_names, y=pop_weight_bys)
+    plt.suptitle(cfg.str() + "\n" + f"{len(pairs_df)} pairs")
 
-    if nullify_pop is not None:
-        neural_pop = NeuralPopulation.from_model(model_file)
-        vecs[:, neural_pop.inputs_mask(pop=nullify_pop)] = .0
 
-    embeddings = embedtools.prep_embeddings(model, vecs, shuff=shuff, seed=seed)
-    plotting.prep_roc_axis()
-    for embed_type, embedded_vecs in embeddings.items():
-        embedded_dists = -embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
-        fpr, tpr, _ = roc_curve(y_true=is_same, y_score=embedded_dists)
-        auc = roc_auc_score(y_true=is_same, y_score=embedded_dists)
-        plt.plot(fpr, tpr, label=f'Embed={embed_type}: auc={auc:2.2f}')
-    plt.legend()
-    plt.title(cfg.str() + "\n" + f"{n*2} pairs")
-
-
-def draw_embedded_vs_metric_dists(model_file, shuff: bool = False, nullify_pop: NEURAL_POP = None, seed: int = 1):
+def draw_embedded_vs_metric_dists(model_file, shuff: bool = False,
+                                  pop_name: NEURAL_POP = NEURAL_POP.FULL, seed: int = 1):
     # ----
     max_n_pairs = 100_000
     binned_plot_kws = {'bins': stats.BinSpec(10, 'u'),
@@ -90,21 +90,25 @@ def draw_embedded_vs_metric_dists(model_file, shuff: bool = False, nullify_pop: 
 
     vecs, _ = data_mgr.get_inputs()
 
-    if nullify_pop is not None:
+    if pop_name != NEURAL_POP.FULL:
         neural_pop = NeuralPopulation.from_model(model_file)
-        vecs[:, neural_pop.inputs_mask(pop=nullify_pop)] = .0
+        vecs[:, ~neural_pop.inputs_mask(pop=pop_name)] = .0
 
     embeddings = embedtools.prep_embeddings(model, vecs, shuff=shuff, seed=seed)
     for embed_type, embedded_vecs in embeddings.items():
         embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
         plotting.plot_binned_stats(x=metric_dists, y=embedded_dists, **binned_plot_kws)
-        plt.title(cfg.str() + f"\nEmbed={embed_type}")
+        plt.title(cfg.str() + f"\nEmbed={embed_type}, {pop_name}")
         plt.ylabel('Affine Distance (Kinematic)')
         plt.xlabel('SubPopulation Distance (Neural)')
 
 
 if __name__ == "__main__":
     for monkey, model_file in cv_results_mgr.get_chosen_model_per_monkey().items():
-        draw_embedded_vs_metric_dists(model_file, shuff=False)
-        #draw_embedding_vs_sameness_ROC(model_file, shuff=False)
+        #compute_neuron_importance(model_file)
+        #draw_embedded_vs_metric_dists(model_file, shuff=False, pop_name=pop_name)
+        draw_embedding_vs_sameness_ROC(
+            model_file, shuff=False,
+            pop_names=[NEURAL_POP.MINORITY, NEURAL_POP.MAJORITY, NEURAL_POP.FULL],
+            pop_weight_bys=['svd_avg1', 'svd_max1'])
     plt.show()

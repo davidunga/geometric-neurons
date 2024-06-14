@@ -5,6 +5,33 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass
 
 
+def otsu_threshold(x):
+
+    bins = np.linspace(np.min(x), np.max(x), min(len(x) + 1, 256))
+    hist, bin_edges = np.histogram(x, bins=bins, density=True)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    max_variance = 0
+    best_threshold = 0
+    for i in range(1, len(bin_centers)):
+        prob_low = np.sum(hist[:i])
+        prob_high = np.sum(hist[i:])
+
+        if prob_low == 0 or prob_high == 0:
+            continue
+
+        mean_low = np.sum(hist[:i] * bin_centers[:i]) / prob_low
+        mean_high = np.sum(hist[i:] * bin_centers[i:]) / prob_high
+
+        variance_between = prob_low * prob_high * (mean_low - mean_high) ** 2
+
+        if variance_between > max_variance:
+            max_variance = variance_between
+            best_threshold = bin_centers[i]
+
+    return best_threshold
+
+
 class ExtremaDetector:
 
     def __init__(self, r: float, rheight: float = .1, rprom: float = .5,

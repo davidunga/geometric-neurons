@@ -5,7 +5,7 @@ Dictionary tools
 from copy import deepcopy
 from itertools import product, chain
 from typing import Callable
-
+import datetime
 import numpy as np
 import pandas as pd
 
@@ -205,3 +205,21 @@ def dict_recursive(d: dict, fn: Callable[[dict], dict]) -> dict:
     """
     return {k: v if not isinstance(k, dict) else dict_recursive(v, fn)
             for k, v in fn(d).items()}
+
+
+def to_json(data):
+    """ convert to json-friendly format """
+    if isinstance(data, dict):
+        return {k: to_json(v) for k, v in data.items()}
+    elif isinstance(data, (list, tuple)):
+        return [to_json(item) for item in data]
+    elif isinstance(data, np.ndarray):
+        return data.tolist()
+    elif isinstance(data, np.number):
+        return data.item()
+    elif isinstance(data, datetime.datetime):
+        return data.isoformat()
+    elif hasattr(data, '__dict__'):
+        return to_json(data.__dict__)
+    else:
+        return data
