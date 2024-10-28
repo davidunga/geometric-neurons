@@ -144,6 +144,12 @@ def dict_product(d):
         yield dict(zip(keys, vals))
 
 
+def is_partially_equal(d1: dict, d2: dict, keys=None):
+    if keys is None:
+        keys = set(d1).intersection(d2)
+    return all(d1[k] == d2[k] for k in keys)
+
+
 def update_nested_dict(d: dict, keys: list, val, allow_new: bool = False):
     """
     Performs d[keys[0]][keys[1]][..] = val

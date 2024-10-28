@@ -1,3 +1,6 @@
+import itertools
+from common.utils.procrustes import PlanarAlign
+from common.utils.polytools import uniform_resample
 import matplotlib.pyplot as plt
 import numpy as np
 from data_manager import DataMgr
@@ -28,16 +31,30 @@ def draw_projections(projs: list[tuple], ixs_of_shape: dict, density_type: str =
             elif density_type == 'kde':
                 sns.kdeplot(x=pc_vecs[seg_ixs, 0], y=pc_vecs[seg_ixs, 1], ax=ax, color=color, fill=False)
             ax.scatter(*pc_vecs[seg_ixs].T, alpha=.5, label=shape, color=color)
+        ax.set_title(f"{pop_name}\nSilhouette={silhouette:2.2f}, Balanced Accuracy={gmm_likelihood:2.2f}")
+        ax.set_xlim([-lm, lm])
+        ax.set_ylim([-lm, lm])
         ax.legend()
 
 
-def draw_shape_embeddings(model_file, n: int = 15, n_to_draw: int = None):
-
-    shape_specs = segment_shapes_tools.get_chosen_shape_specs()
-    print("Using Specs:")
-    print(shape_specs)
+def draw_shape_embeddings(model_file):
+    from common.utils.shapes_specs import ShapeSpec
 
     model, cfg = cv_results_mgr.get_model_and_config(model_file)
+    monkey = cfg.data.trials.name.split('_')[-1]
+
+    shape_specs = cv_results_mgr.get_chosen_shape_specs(False)
+
+    shape_specs = {f'Shape{i+1}': s for i, s in enumerate(shape_specs)}
+    proj_kws = cv_results_mgr.get_chosen_projection_specs()
+    methods = proj_kws['method']
+    n = proj_kws['n_per_shape'][monkey]
+    rectify_by = proj_kws['rectify_by']
+
+    #shape_specs = segment_shapes_tools.get_chosen_shape_specs()
+    print("Projecting Shapes:", shape_specs)
+    print("Projection Params:", proj_kws)
+
     data_mgr = DataMgr(cfg.data, persist=True)
     input_vecs, _ = data_mgr.get_inputs()
     segments = data_mgr.load_segments()
@@ -45,34 +62,37 @@ def draw_shape_embeddings(model_file, n: int = 15, n_to_draw: int = None):
 
     conics, scores_df = data_mgr.load_fitted_conics()
     valid_ixs = segment_shapes_tools.get_valid_conic_ixs(scores_df)
-    seg_groups = segment_processing.digitize_segments(segments, n=n, by='EuSpd', include_ixs=valid_ixs)
+    seg_groups = segment_processing.digitize_segments(segments, n=n, by=rectify_by, include_ixs=valid_ixs)
 
     ixs_of_shape = segment_shapes_tools.match_conics_to_specs(
         conics=conics, segment_labels=seg_groups, shape_specs=shape_specs, n=n)
 
-    projs = segment_processing.compute_projections(model, input_vecs, neural_pop, groups=ixs_of_shape, n_pcs=2,
-                                                   pop_names=[NEURAL_POP.MAJORITY, NEURAL_POP.MINORITY])
-
     colors = plotting.get_nice_colors(ixs_of_shape)
 
-    if n_to_draw is not None:
-        for shape_name, ixs in ixs_of_shape.items():
-            if len(ixs) < n_to_draw:
-                continue
-            x = input_vecs[ixs]
-            dists = np.sum((x - x.mean(axis=0)) ** 2, axis=1)
-            ixs_of_shape[shape_name] = [ixs[i] for i in np.argsort(dists)[:n_to_draw]]
+    # -----
 
-    axs = plotting.named_subplots(cols=ixs_of_shape, eq=True)
-    for name, ixs in ixs_of_shape.items():
-        pts = conics[ixs[2]].get_standardized().parametric_pts()
-        pts /= np.std(pts, axis=0)
-        axs[name].plot(*pts.T, color=colors[name])
-        axs[name].set_title(name)
-    plt.suptitle(data_mgr.cfg.trials.name + " - EXAMPLE SHAPES")
+    projs = segment_processing.compute_projections(model, input_vecs, neural_pop, groups=ixs_of_shape, n_pcs=2,
+                                                   pop_names=[NEURAL_POP.MAJORITY, NEURAL_POP.MINORITY], methods=methods)
+
+    n_samples_to_draw = 3
+    also_draw_segment = True
+    for i_sample in range(n_samples_to_draw):
+        axs = plotting.named_subplots(cols=ixs_of_shape, eq=True)
+        for name, ixs in ixs_of_shape.items():
+            pts = conics[ixs[i_sample]].get_standardized().parametric_pts()
+            pts /= np.std(pts, axis=0)
+            axs[name].plot(*pts.T, color=colors[name])
+            if also_draw_segment:
+                seg_pts, _ = uniform_resample(segments[ixs[i_sample]].kin.X, len(pts))
+                seg_pts, _ = PlanarAlign('ortho')(pts, seg_pts)
+                axs[name].plot(*seg_pts.T, color='k')
+
+            axs[name].set_title(name)
+            axs[name].axis('off')
+        plt.suptitle(data_mgr.cfg.trials.name + " - EXAMPLE SHAPES")
 
     draw_projections(projs, ixs_of_shape, density_type='kde')
-    plt.suptitle(data_mgr.cfg.trials.name + " - PROJECTIONS")
+    plt.suptitle(data_mgr.monkey)
 
     data = {'Speed': [], 'Acceleration': [], 'Shape': []}
     for shape, seg_ixs in ixs_of_shape.items():

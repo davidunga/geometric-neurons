@@ -1,0 +1,23 @@
+neural_pop:
+  importance:
+    method: dist2
+    power: 1
+  split:
+    method: iqr
+shapes:
+  - { kind: e, e: 0.95, bias: 2.00 }
+  - { kind: e, e: 0.80, bias: -1.8 }
+  - { kind: p, e: 1.00, bias: 00.0 }
+shape_projections:
+  method: lda
+  n_per_shape:
+    RS: 23
+    RJ: 15
+  rectify_by: 'EuSpd'
+model_files:
+  RS: '/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal c9b8e1.Fold0.pth'
+  RJ: '/Users/davidu/geometric-neurons/outputs/models/TP_RJ bin10 lag100 dur200 affine-kinX-nmahal a23455.Fold0.pth'
+
+
+
+

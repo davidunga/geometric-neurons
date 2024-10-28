@@ -205,7 +205,7 @@ def draw_embedded_vs_metric_dists(model_file):
             embedded_vecs = dlutils.safe_predict(dlutils.randomize_weights(model), vecs)
         else:
             embedded_vecs = dlutils.safe_predict(model, vecs) if embed else vecs
-        embedded_dists = embedding_eval.pairs_dists(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy())
+        embedded_dists = np.sqrt(embedding_eval.pairs_dists2(embedded_vecs, pairs=pairs_df[['seg1', 'seg2']].to_numpy()))
         plotting.plot_binned_stats(x=metric_dists, y=embedded_dists, **binned_plot_kws)
         plt.title(f"Embed={embed}")
 

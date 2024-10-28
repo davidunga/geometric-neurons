@@ -20,6 +20,10 @@ class DataMgr:
         self.persist = persist  # keep loaded segments in memory
         self._segments: list[Segment] = []
 
+    @property
+    def monkey(self) -> str:
+        return self.cfg.trials.name.split('_')[-1]
+
     def pkl_path(self, level: DataConfig.Level, mod: str = '') -> Path:
         parts = [self.cfg.str(level), str(level), mod, 'pkl']
         return paths.DATA_DIR / '.'.join([p for p in parts if p])
@@ -104,6 +108,9 @@ class DataMgr:
         pairs['isSame'] = is_same
 
         if n_pairs is not None:
+            if n_pairs < 1:
+                n_pairs = int(n_pairs * num_pairs)
+                print("n_pairs=", n_pairs)
             ixs = uniform_sample_pairs(pairs_df=pairs, max_n_pairs=n_pairs)
             pairs = pairs.iloc[ixs]
 

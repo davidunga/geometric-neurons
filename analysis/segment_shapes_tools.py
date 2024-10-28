@@ -11,9 +11,11 @@ from neural_population import NeuralPopulation, NEURAL_POP
 from analysis.config import DataConfig
 from common.utils.conics.conic_fitting import fit_conic_ransac, Conic
 from analysis import segment_processing
+from common.utils import dictools
 
 
 specs_file = paths.PROCESSED_DIR / 'shape_specs.json'
+
 
 
 def get_chosen_shape_specs(by: str = 'lda_score', rank: int = 2, rename: bool = True):
@@ -65,16 +67,31 @@ def match_conics_to_specs(conics: list[Conic], segment_labels: np.ndarray,
     return ixs_of_shape
 
 
-def seek_specs(model_file, n_pcs: int = 2, n: int = 30):
+def seek_specs():
 
-    assert n_pcs in (2, 3)
-    specs_json = str(specs_file) + '.SEEK'
+    import analysis_optim
+
+    n_pcs = 2
+    top_k = 5
+    ns = [10, 20]
     dump_every = 20
+
+    popspec_scores = analysis_optim.load_scores()
+    model_files = popspec_scores.iloc[:top_k][['RS_file', 'RJ_file']].to_numpy().flatten().tolist()
+    model_files = sorted(set(model_files))
+
+    def _get_popspec(model_file, rank_):
+        df = popspec_scores.loc[(popspec_scores['RS_file'] == model_file) | (popspec_scores['RJ_file'] == model_file)]
+        return df.iloc[rank_]['pop_spec']
+
+    models, cfgs = cv_results_mgr.group_models_by_config(model_files)
 
     def _yield_spec_candidates():
         bias_grid = np.round(np.linspace(-2, 2, 7), 2)
         e_grid = np.array([0.55, 0.65, 0.7, 0.75, 0.8, 0.85, 0.95])
         for kinds in (['e', 'p', 'p'], ['p', 'e', 'e']):
+            if kinds == ['p', 'e', 'e']:
+                continue
             es = tuple(e_grid if kind == 'e' else [1] for kind in kinds)
             for b1, b2, b3, e1, e2, e3 in product([0], bias_grid[bias_grid >= 0], bias_grid[bias_grid < 0], *es):
                 s1 = ShapeSpec(kind=kinds[0], e=e1, bias=b1)
@@ -83,49 +100,73 @@ def seek_specs(model_file, n_pcs: int = 2, n: int = 30):
                 spec_cand = {s1.name: s1, s2.name: s2, s3.name: s3}
                 yield spec_cand
 
-    model, cfg = cv_results_mgr.get_model_and_config(model_file)
-    data_mgr = DataMgr(cfg.data, persist=True)
-    input_vecs, _ = data_mgr.get_inputs()
-    segments = data_mgr.load_segments()
-    neural_pop = NeuralPopulation.from_model(model_file)
-
-    conics, scores_df = data_mgr.load_fitted_conics()
-    valid_ixs = get_valid_conic_ixs(scores_df)
-    seg_groups = segment_processing.digitize_segments(segments, n=n, by='EuSpd', include_ixs=valid_ixs)
-
     spec_candidates = list(_yield_spec_candidates())
+    total_models_count = sum(len(v) for v in models.values())
+    count = 0
 
-    if os.path.isfile(specs_json):
-        items = json.load(open(specs_json, 'r'))
-        existing_specs = set(item['specs'] for item in items if item['dataset'] == data_mgr.cfg.trials.name)
-    else:
-        items = []
-        existing_specs = set()
+    existing_items = []
+    if analysis_optim.proj_scores_file.is_file():
+        existing_items = json.load(analysis_optim.proj_scores_file.open('r'))
+    items = list(existing_items)
 
-    for spec_ix, shape_specs in enumerate(spec_candidates):
-        specs_str = json.dumps({k: v.to_dict() for k, v in shape_specs.items()})
-        if specs_str in existing_specs:
-            continue
+    for cfg_id in cfgs:
 
-        ixs_of_shape = match_conics_to_specs(conics=conics, segment_labels=seg_groups, shape_specs=shape_specs, n=n)
-        projs = segment_processing.compute_projections(model, input_vecs, neural_pop, groups=ixs_of_shape,
-                                                       pop_names=[NEURAL_POP.MAJORITY, NEURAL_POP.MINORITY])
+        cfg = cfgs[cfg_id]
+        data_mgr = DataMgr(cfg.data, persist=True)
+        input_vecs, _ = data_mgr.get_inputs()
+        segments = data_mgr.load_segments()
+        conics, scores_df = data_mgr.load_fitted_conics()
+        valid_ixs = get_valid_conic_ixs(scores_df)
 
-        # -----
+        ixs_of_shapes = {}
+        for n in ns:
+            seg_groups = segment_processing.digitize_segments(segments, n=n, by='EuSpd', include_ixs=valid_ixs)
+            for spec_ix in range(len(spec_candidates)):
+                ixs_of_shapes[(spec_ix, n)] = match_conics_to_specs(
+                    conics=conics, segment_labels=seg_groups, shape_specs=spec_candidates[spec_ix], n=n)
 
-        item = {'dataset': data_mgr.cfg.trials.name, 'specs': specs_str}
-        for proj in projs:
-            _, method, _, score = proj
-            item[f'{method}_score'] = score
-        items.append(item)
+        for model_file, model in models[cfg_id]:
+            count += 1
+            print(f"{count}/{total_models_count} {model_file}")
 
-        print(f"{spec_ix}/{len(spec_candidates)}", item)
-        if (len(items) % dump_every == 0) or (spec_ix == len(spec_candidates) - 1):
-            json.dump(items, open(specs_json, 'w'))
-            print("DUMPED")
-            if len(items) < 2 * dump_every:
-                assert len(json.load(open(specs_json, 'r'))) == len(items)
-                print("VERIFIED")
+            for score_rank in [0, 1, 2]:
+
+                try:
+                    neural_pop = NeuralPopulation.from_model(model_file, spec=_get_popspec(model_file, score_rank))
+                except:
+                    continue
+
+                for spec_ix, n in product(list(range(len(spec_candidates))), ns):
+
+                    shape_specs_str = json.dumps({k: v.to_dict() for k, v in spec_candidates[spec_ix].items()})
+                    item = {'dataset': data_mgr.cfg.trials.name,
+                            'shape_specs': shape_specs_str,
+                            'pop_spec': neural_pop.spec_str,
+                            'n_projs': n,
+                            'model_file': model_file}
+
+                    if any(dictools.is_partially_equal(item, existing_item) for existing_item in existing_items):
+                        continue
+
+                    ixs_of_shape = ixs_of_shapes[(spec_ix, n)]
+
+                    projs = segment_processing.compute_projections(
+                        model, input_vecs, neural_pop, groups=ixs_of_shape,
+                        pop_names=[NEURAL_POP.MAJORITY, NEURAL_POP.MIDMAJ, NEURAL_POP.MINORITY])
+
+                    # -----
+
+                    for proj in projs:
+                        pop_label, method, _, score = proj
+                        item[str(pop_label) + '_' + method] = score
+                    items.append(item)
+
+                    if len(items) % dump_every == 0:
+                        json.dump(items, analysis_optim.proj_scores_file.open('w'))
+                        print("DUMPED")
+
+    json.dump(items, analysis_optim.proj_scores_file.open('w'))
+    print("DONE.")
 
 
 def calc_and_save_conic_fits(model_file):
@@ -157,3 +198,7 @@ def calc_and_save_conic_fits(model_file):
     items = json.load(conics_file.open('r'))
     conics = [get_conic(**fit_result['conic']) for fit_result in items['conic_fits']]
     print("Okay. Done.")
+
+
+if __name__ == "__main__":
+    seek_specs()

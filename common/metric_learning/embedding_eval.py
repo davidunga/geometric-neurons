@@ -174,7 +174,7 @@ def evaluate_embedded_vecs(
         pairs: Sequence[tuple[int, int]],
         is_same: NpVec[bool] = None,
         loss_func: EmbeddingLoss = None) -> EmbeddingEvalResult:
-    dists = pairs_dists(embedded_vecs, pairs)
+    dists = np.sqrt(pairs_dists2(embedded_vecs, pairs))
     assert len(pairs) == len(is_same) == len(dists)
     return evaluate_embedded_dists(dists, is_same, loss_func)
 
@@ -192,11 +192,13 @@ def make_triplet_pairs(anchors: list[int], positives: list[int], negatives: list
     return pairs, is_same
 
 
-def pairs_dists(x: NpPoints, pairs: Sequence[tuple[int, int]]) -> NpVec[float]:
+def pairs_dists2(x: NpPoints, pairs: Sequence[Sequence[int]]) -> NpVec[float]:
     if x.ndim == 1:
         x = x.reshape(-1, 1)
     assert x.ndim == 2
-    return np.linalg.norm([x[i] - x[j] for (i, j) in pairs], axis=1)
+    inds1, inds2 = np.asarray(pairs).T
+    dists2 = np.sum(np.square(x[inds1] - x[inds2]), axis=1)
+    return dists2
 
 
 def _test_loss_func():

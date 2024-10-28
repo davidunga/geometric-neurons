@@ -1,0 +1,21 @@
+neural_pop:
+  importance:
+    method: svd_max
+    power: 2
+  split:
+    method: otsu
+shapes:
+  - { kind: p, e: 1.00, bias: 0.0 }
+  - { kind: e, e: 0.95, bias: 2.0 }
+  - { kind: e, e: 0.80, bias: -2.0 }
+shape_projections:
+  method: lda
+  n_per_shape: 10
+model_files:
+  RS: ''
+  RJ: ''
+
+
+
+
+
