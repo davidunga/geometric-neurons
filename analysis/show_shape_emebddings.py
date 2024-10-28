@@ -11,13 +11,15 @@ from analysis import segment_processing
 
 
 def draw_projections(projs: list[tuple], ixs_of_shape: dict, density_type: str = 'kde'):
+    lm = 6
+
     pop_names = sorted(set(proj[0] for proj in projs))
     methods = sorted(set(proj[1] for proj in projs))
     colors = plotting.get_nice_colors(ixs_of_shape)
 
     axs = plotting.named_subplots(cols=pop_names, rows=methods, eq=True)
     plotting.set_outter_labels(axs, t=pop_names, y=methods)
-    for (pop_name, method, pc_vecs, score) in projs:
+    for (pop_name, method, pc_vecs, (silhouette, gmm_likelihood)) in projs:
         ax = axs[(method, pop_name)]
         for shape, seg_ixs in ixs_of_shape.items():
             color = colors[shape]

@@ -136,7 +136,7 @@ class Inliers:
 
     _defaults = {'iqr': 1.5, 'sigmas': 3, 'percentiles': .01}
 
-    def __init__(self, method: str, thresh=None):
+    def __init__(self, method: str, thresh=None, side: str = 'both'):
         """
         method: 'iqr' = interquartile range
                 'sigmas' = robust zscore
@@ -152,6 +152,7 @@ class Inliers:
             thresh = (thresh, 1 - thresh)
         self.thresh = thresh
         self._bounds = None
+        self._side = side
 
     def fit(self, x: np.ndarray):
         self._bounds = self.inlier_bounds(x)
@@ -187,6 +188,16 @@ class Inliers:
             lb, ub = float('-inf'), float('inf')
         else:
             raise ValueError("Unknown method")
+
+        if self._side == 'r':
+            lb = float('-inf')
+        elif self._side == 'l':
+            ub = float('inf')
+        elif self._side == 'both':
+            pass
+        else:
+            raise ValueError("Unknown side")
+
         return lb, ub
 
 

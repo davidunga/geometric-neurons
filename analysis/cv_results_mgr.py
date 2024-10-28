@@ -10,9 +10,29 @@ from common.utils import ostools
 from common.utils.dlutils import SnapshotMgr
 from common.utils.typings import *
 from motorneural.datasets import get_datasets_specs
-from common.utils import dlutils
-import torch
+from common.utils import dlutils, hashtools
+from collections import defaultdict
 from common.metric_learning.embedding_models import LinearEmbedder
+import yaml
+from copy import deepcopy
+from common.utils.shapes_specs import ShapeSpec
+
+_analysis_config = yaml.safe_load((paths.ANALYSIS_DIR / 'analysis_config.yml').open('r'))
+
+
+def get_analysis_config() -> dict:
+    return deepcopy(_analysis_config)
+
+
+def group_models_by_config(model_files) -> tuple[dict, dict]:
+    models = defaultdict(list)
+    cfgs = {}
+    for model_file in model_files:
+        model, cfg = get_model_and_config(model_file)
+        cfg_id = hashtools.calc_hash(cfg.data)
+        models[cfg_id].append((model_file, model))
+        cfgs[cfg_id] = cfg
+    return models, cfgs
 
 
 def get_model_and_config(model_file) -> tuple[LinearEmbedder, Config]:
@@ -266,11 +286,32 @@ def _abbreviate(s: str):
 
 
 def get_chosen_model_file(monkey: str) -> Path:
-    return make_model_file_path(Config.from_chosen(monkey), fold=0)
+    return get_chosen_model_per_monkey()[monkey]
 
 
 def get_chosen_model_per_monkey() -> dict[str, Path]:
-    return {monkey: get_chosen_model_file(monkey) for monkey in ['RS', 'RJ']}
+    return {monkey: Path(model_file) for monkey, model_file in get_analysis_config()['model_files'].items()}
+
+
+def get_chosen_shape_specs(asdict: bool = True):
+    shape_specs = [ShapeSpec(**spec) for spec in get_analysis_config()['shapes']]
+    if asdict:
+        shape_specs = {s.name: s for s in shape_specs}
+    return shape_specs
+
+
+def get_chosen_projection_specs():
+    return get_analysis_config()['shape_projections']
+
+
+def get_chosen_pop_specs() -> dict:
+    s = get_analysis_config()['neural_pop']
+    ret = {
+        'importance_method': s['importance']['method'],
+        'importance_power': s['importance']['power'],
+        'split_method': s['split']['method']
+    }
+    return ret
 
 
 if __name__ == "__main__":

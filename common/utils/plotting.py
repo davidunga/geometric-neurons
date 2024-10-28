@@ -12,7 +12,6 @@ from matplotlib.patches import Ellipse
 from sklearn.covariance import MinCovDet
 from common.utils import gaussians
 
-_marks_markers = {0: '*', -1: 's'}
 _nice_colors = [
     'DodgerBlue', 'HotPink', 'LimeGreen', 'Orange', 'Crimson', 'SlateBlue',
     'Gold', 'MediumPurple', 'Tomato', 'SpringGreen', 'RoyalBlue', 'Orchid',
@@ -21,7 +20,8 @@ _nice_colors = [
 ]
 
 
-def plot(xy, *args, marks='', **kwargs):
+def plot(xy, *args, hue=None, hue_labels='auto', **kwargs):
+
     if isinstance(xy, tuple):
         x, y = xy
     else:
@@ -32,15 +32,28 @@ def plot(xy, *args, marks='', **kwargs):
         else:
             assert xy.ndim == 2
             x, y = xy.T
-    p = plt.plot(x, y, *args, **kwargs)
-    color = p[0].get_color()
-    if marks:
-        for mark in marks.split(','):
-            i = int(mark)
-            plt.plot(x[i], y[i], color=color, marker=_marks_markers[i])
+
+    if hue is None:
+        hue = np.ones_like(x, int)
+        hue_values = {1}
+    else:
+        hue = np.asarray(hue)
+        hue_values = set(hue)
+    assert len(hue) == len(x)
+    if hue_labels is None:
+        hue_labels = {v: None for v in hue_values}
+    elif hue_labels == 'auto':
+        hue_labels = {v: str(v) for v in hue_values}
+    else:
+        assert isinstance(hue_labels, dict)
+    for hue_value in hue_values:
+        mask = hue == hue_value
+        plt.plot(x[mask], y[mask], *args, label=hue_labels[hue_value], **kwargs)
 
 
-def get_nice_colors(names=None) -> dict[str, str] | list[str]:
+
+
+def get_nice_colors(names=None) -> dict | list:
     if names is not None:
         return dict(zip(names, _nice_colors))
     return list(_nice_colors)
@@ -129,16 +142,32 @@ def remove_inner_labels(axs, keep_legend: tuple | str = (0, 0)):
 
 def set_outter_labels(axs, x: str | list = None, y: str | list = None, t=None):
     if isinstance(axs, dict):
-        i0 = y[0]
+
+        def _parse_dict_args(a):
+            if a is None:
+                return None, None
+            if isinstance(a, dict):
+                labels = list(a.values())
+                keys = list(a.keys())
+            else:
+                keys = labels = a
+            return keys, labels
+
+        x, xl = _parse_dict_args(x)
+        y, yl = _parse_dict_args(y)
+        t, tl = _parse_dict_args(t)
+
+        i0 = None if y is None else y[0]
         j0 = x[0] if x is not None else t[0]
-        for i in y:
-            axs[(i, j0)].set_ylabel(i)
+        if y is not None:
+            for i, label in zip(y, yl):
+                axs[(i, j0)].set_ylabel(label)
         if x is not None:
-            for j in x:
-                axs[(i0, j)].set_xlabel(j)
+            for j, label in zip(x, xl):
+                axs[j if i0 is None else (i0, j)].set_xlabel(label)
         else:
-            for j in t:
-                axs[(i0, j)].set_title(j)
+            for j, label in zip(t, tl):
+                axs[j if i0 is None else (i0, j)].set_title(label)
         return
     if x is not None:
         for ax, label in zip(axs[-1, :].flatten(), x):
@@ -418,6 +447,7 @@ def bandplot(x, y, er, ax=None, band_kws: dict = None, **line_kwargs):
     if ax is None: ax = plt.gca()
     p = ax.plot(x, y, **line_kwargs)
     default_band_kws = {'alpha': .2, 'color': p[0].get_color()}
+    if not band_kws: band_kws = {}
     if not isinstance(er, tuple):
         er = (er,)
     assert len(er) in (1, 2)

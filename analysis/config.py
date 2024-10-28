@@ -10,12 +10,12 @@ from common.utils import dictools
 _configs_grid = yaml.safe_load((ANALYSIS_DIR / 'configs_grid.yml').open('r'))
 _configs_best_grid = yaml.safe_load((ANALYSIS_DIR / 'configs_grid_best.yml').open('r'))
 _config_mods_for_eval = yaml.safe_load((ANALYSIS_DIR / 'config_mods_for_eval.yml').open('r'))
-_configs_chosen_per_dataset = {
-    'TP_RS': yaml.safe_load((ANALYSIS_DIR / 'configs_chosen.yml').open('r')),
-    'TP_RJ': yaml.safe_load((ANALYSIS_DIR / 'configs_chosen.yml').open('r')),
-}
-for dataset in _configs_chosen_per_dataset:
-    _configs_chosen_per_dataset[dataset]['data']['trials']['name'] = dataset
+# _configs_chosen_per_dataset = {
+#     'TP_RS': yaml.safe_load((ANALYSIS_DIR / 'configs_chosen.yml').open('r')),
+#     'TP_RJ': yaml.safe_load((ANALYSIS_DIR / 'configs_chosen.yml').open('r')),
+# }
+# for dataset in _configs_chosen_per_dataset:
+#     _configs_chosen_per_dataset[dataset]['data']['trials']['name'] = dataset
 
 
 @dataclass(init=False)
@@ -33,10 +33,10 @@ class Config:
     @classmethod
     def from_default(cls):
         return cls(next(dictools.dict_product_from_grid(_configs_grid)))
-
-    @classmethod
-    def from_chosen(cls, monkey: str):
-        return cls(_configs_chosen_per_dataset['TP_' + monkey])
+    #
+    # @classmethod
+    # def from_chosen(cls, monkey: str):
+    #     return cls(_configs_chosen_per_dataset['TP_' + monkey])
 
     @classmethod
     def yield_from_grid(cls, best: bool = False):

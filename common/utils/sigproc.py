@@ -3,6 +3,16 @@ from common.utils import stats
 from scipy.signal import find_peaks, peak_prominences
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
+from scipy.ndimage import gaussian_filter1d
+
+
+def gauss_smooth_1d(x, sigma: float, axis: int = -1, mode: str = 'reflect'):
+    """
+        mode: {‘reflect’ (default), ‘constant’, ‘nearest’, ‘mirror’, ‘wrap’}
+    """
+    if not sigma:
+        return x
+    return gaussian_filter1d(x, sigma=sigma, axis=axis, mode=mode)
 
 
 def otsu_threshold(x):

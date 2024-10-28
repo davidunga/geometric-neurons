@@ -38,6 +38,18 @@ def get_optimizer(model_params, kind: str = 'Adam', **optim_kws):
     return getattr(torch.optim, kind)(model_params, **optim_kws)
 
 
+def extract_weight_and_bias_from_linear_model(model) -> tuple[np.ndarray, np.ndarray]:
+    w, b = [p.cpu().detach().numpy().copy() for p in model.parameters()]
+    return w, b
+
+
+def compute_squared_loadings_of_linear_model(model) -> np.ndarray:
+    w, _ = extract_weight_and_bias_from_linear_model(model)
+    U, S, Vt = np.linalg.svd(w, full_matrices=False)
+    squared_loadings = np.sum(np.square(Vt.T) * np.square(S), axis=1)
+    return squared_loadings
+
+
 def get_torch_device(device: str = 'auto') -> str:
     """
     Get the PyTorch device.

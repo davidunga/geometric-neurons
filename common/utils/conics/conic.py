@@ -68,7 +68,7 @@ class Conic:
 
     def bounds_bias(self):
         """
-        left the abs value of the bounds be [a, b], and a > b
+        let the abs value of the bounds be [a, b], and a > b
         then the bias is: (a-b)/b
         i.e., a = b*(bias + 1)
         if a < b, the sign of the bias is negative.
