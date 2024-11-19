@@ -1,3 +1,4 @@
+import itertools
 from itertools import product
 import matplotlib.pyplot as plt
 import numpy as np
@@ -307,9 +308,10 @@ def make_split_grid(nrows: int):
     return small_axs, big_ax
 
 
-def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2, figsize=(10, 6), eq: bool = False, **kwargs):
+def subplots(nrows: int = 1, ncols: int = 1, ndim: int = 2,
+             figsize=(10, 6), eq: bool = False, style: str = 'darkgrid', **kwargs):
     assert ndim in (2, 3)
-    sns.set_style('darkgrid')
+    sns.set_style(style)
     if ndim == 3:
         kwargs['subplot_kw'] = kwargs.get('subplot_kw', {})
         kwargs['subplot_kw']['projection'] = '3d'
@@ -364,6 +366,17 @@ def get_ax(ax):
         else:
             raise ValueError('Unknown axis type')
     assert ax is not None
+    return ax
+
+
+def rebuild_axis(ax, kws):
+    fig = ax.get_figure()
+    s = ax.get_subplotspec()
+    nrows, ncols = s.get_gridspec().nrows, s.get_gridspec().ncols
+    i, j = s.rowspan.start, s.colspan.start
+    idx = 1 + i * ncols + j
+    fig.delaxes(ax)
+    ax = fig.add_subplot(nrows, ncols, idx, **kws)
     return ax
 
 

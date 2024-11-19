@@ -1,5 +1,5 @@
 import numpy as np
-
+from common.utils.distance_metrics import get_metric_func
 import common.utils.linalg as linalg
 from common.utils.typings import *
 
@@ -51,6 +51,33 @@ class PlanarAlign:
         else:
             scale = 1.0
         return (xx - loc) / scale, loc, scale
+
+
+class PlanarAlignTo:
+
+    def __init__(self, kind: str = 'affine', X_dst: NDArray = None):
+        self.aligner = PlanarAlign(kind)
+        self.X_dst = X_dst
+
+    def set_align_kind(self, kind: str):
+        self.aligner = PlanarAlign(kind)
+
+    def __call__(self, X: NDArray):
+        assert self.X_dst is not None, "Dest trajectory not set"
+        return self.aligner(self.X_dst, X)[0]
+
+
+class AlignedDist:
+
+    def __init__(self, kind: str = 'affine', metric: str | Callable = 'nmahal'):
+        self.aligner = PlanarAlign(kind)
+        self.dist_func = get_metric_func(metric) if isinstance(metric, str) else metric
+
+    def __call__(self, X1: NDArray, X2: NDArray):
+        X2_aligned = self.aligner(X1, X2)[0]
+        return self.dist_func(X1, X2_aligned)
+
+
 #
 #     def verify_matrix_kind(self, A: NpMatrix):
 #
