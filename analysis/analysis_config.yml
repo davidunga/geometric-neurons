@@ -13,7 +13,7 @@ shape_projections:
   n_per_shape:
     RS: 23
     RJ: 15
-  rectify_by: 'EuSpd'
+  rectify_by: 'EuAcc'
 model_files:
   RS: '/Users/davidu/geometric-neurons/outputs/models/TP_RS bin10 lag100 dur200 affine-kinX-nmahal c9b8e1.Fold0.pth'
   RJ: '/Users/davidu/geometric-neurons/outputs/models/TP_RJ bin10 lag100 dur200 affine-kinX-nmahal a23455.Fold0.pth'

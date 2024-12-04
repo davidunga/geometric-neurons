@@ -3,6 +3,7 @@ from scipy import sparse
 from common.utils import symmetric_pairs
 from collections import Counter, defaultdict
 import numpy as np
+import networkx as nx
 from scipy.stats import chisquare
 from common.utils import strtools
 
@@ -16,13 +17,33 @@ def validate(df: pd.DataFrame):
     assert 'num_pairs' in df.attrs
 
 
-def to_sparse_matrix(pairs_df: pd.DataFrame, value_col: str, map_zero_value=None, dtype=None) -> sparse.csr_array:
+def to_dist_matrix(pairs_df: pd.DataFrame, value_col: str = 'dist'):
+    n = pairs_df.attrs['num_segments']
+    matrix = np.zeros((n, n), dtype=float)
+
+    rows, cols = pairs_df[['seg1', 'seg2']].to_numpy().T
+    values = pairs_df[value_col].values
+
+    matrix += 1e3 * values.max()
+    np.fill_diagonal(matrix, .0)
+    matrix[rows, cols] = values
+    matrix[cols, rows] = values
+
+    return matrix
+
+
+def to_sparse_matrix(pairs_df: pd.DataFrame, value_col: str,
+                     map_zero_value=None, dtype=None, symmetric: bool = False) -> sparse.csr_array:
     validate(pairs_df)
     values = pairs_df[value_col].to_numpy(dtype=dtype)
     if map_zero_value:
         values[values == 0] = map_zero_value
     n = pairs_df.attrs['num_segments']
-    mtx = symmetric_pairs.to_sparse_matrix(values, n, pairs_df[['seg1', 'seg2']].to_numpy())
+    pairs = pairs_df[['seg1', 'seg2']].to_numpy()
+    if symmetric:
+        pairs = np.vstack((pairs, np.fliplr(pairs)))
+        values = np.concatenate((values, values))
+    mtx = symmetric_pairs.to_sparse_matrix(values, n, pairs)
     return mtx
 
 

@@ -1,0 +1,307 @@
+- title: "Scale-Invariant Movement Encoding in the Human Motor System"
+  authors: "Naama Kadmon Harpaz, Tamar Flash, Ilan Dinstein"
+  date: 2014
+  DOI: "10.1016/j.neuron.2013.10.058"
+  abstract: |
+    This study examines how the human motor system efficiently encodes movements by representing their shape/trajectory independent of their size, revealing scale-invariant movement encoding in primary motor cortex (M1) and anterior intraparietal sulcus (aIPS) using fMRI and kinematic data.
+  mainResults:
+    - Primary motor cortex and anterior intraparietal sulcus encode movements invariantly to scale.
+    - Evidence supports a hierarchical motor control model that abstracts movement shape.
+    - fMRI decoding showed consistent activity patterns despite scale variations.
+
+- title: "Affine Differential Geometry Analysis of Human Arm Movements"
+  authors: "Tamar Flash, Amir A. Handzel"
+  date: 2007
+  DOI: "10.1007/s00422-007-0145-5"
+  abstract: |
+    This paper introduces an affine geometric framework to analyze human arm movements, focusing on invariants like equi-affine velocity and arc-length, and explores the role of motion primitives such as parabolas in motor planning.
+  mainResults:
+    - Equi-affine velocity is piecewise constant during movement segments.
+    - Movement time is proportional to equi-affine arc length.
+    - Parabolas and other conic sections may act as motor primitives.
+
+- title: "Encoding of Movement Fragments in the Motor Cortex"
+  authors: "Nicholas G. Hatsopoulos, Qingqing Xu, Yali Amit"
+  date: 2007
+  DOI: ~
+  abstract: |
+    This study demonstrates that motor cortical neurons encode temporally extended movement trajectories rather than instantaneous parameters, suggesting a framework for combining movement fragments into complex motor actions.
+  mainResults:
+    - Neurons encode time-extended trajectories, not instantaneous variables.
+    - Temporal trajectories improve decoding accuracy of movement direction.
+    - Supports a synthetic view of motor cortical function as encoding primitives.
+
+- title: "Spatial Constant Equi-Affine Speed and Motion Perception"
+  authors: "Uri Maoz, Tamar Flash"
+  date: 2014
+  DOI: "10.1152/jn.01071.2012"
+  abstract: |
+    This paper extends the two-thirds power law to three-dimensional motion and demonstrates that equi-affine geometry dominates spatial motion perception, linking geometric invariants to motion perception and production.
+  mainResults:
+    - Perceived uniformity in motion aligns with equi-affine speed.
+    - Experimental findings validate equi-affine geometry in visual perception.
+    - Demonstrates link between geometric motion planning and perception.
+
+- title: "Minimum-Jerk, Two-Thirds Power Law, and Isochrony: Converging Approaches to Movement Planning"
+  authors: "Paolo Viviani, Tamar Flash"
+  date: 1995
+  DOI: ~
+  abstract: |
+    This paper compares the Minimum Jerk model with the two-thirds power law, demonstrating how these principles explain kinematic patterns in human movements like drawing and reaching.
+  mainResults:
+    - Two-thirds power law predicts curvature-speed coupling.
+    - Minimum Jerk model explains velocity scaling within movement subunits.
+    - Isochrony principle arises naturally from these planning models.
+
+- title: "Movement Decomposition in the Primary Motor Cortex"
+  authors: "Naama Kadmon Harpaz, David Ungarish, Nicholas G. Hatsopoulos, Tamar Flash"
+  date: 2019
+  DOI: "10.1093/cercor/bhy060"
+  abstract: |
+    This study investigates movement decomposition in primary motor cortex using hidden Markov models, identifying transitions in neural activity associated with kinematic epochs and revealing abrupt neural activity changes.
+  mainResults:
+    - Hidden Markov models reveal decomposition of neural activity into kinematic epochs.
+    - Abrupt transitions correspond to acceleration and deceleration epochs.
+    - Suggests modular organization in motor cortex for movement segmentation.
+
+- title: "Cortical Control of Arm Movements: A Dynamical Systems Perspective"
+  authors: "Krishna V. Shenoy, Maneesh Sahani, Mark M. Churchland"
+  date: 2013
+  DOI: "10.1146/annurev-neuro-062111-150509"
+  abstract: |
+    This review presents a dynamical systems framework for understanding cortical activity in arm movements, focusing on neural dynamics rather than traditional encoding or decoding approaches.
+  mainResults:
+    - Emphasizes neural dynamics over representational views of motor control.
+    - Highlights preparatory and movement-related activity as part of population dynamics.
+    - Proposes a unified dynamical systems framework for motor cortex.
+
+- title: "Geometrical Invariance and Smoothness Maximization for Task-Space Movement Generation"
+  authors: "Yaron Meirovitch, Daniel Bennequin, Tamar Flash"
+  date: 2016
+  DOI: ~
+  abstract: |
+    This study introduces a smoothness-accuracy tradeoff model for trajectory planning, emphasizing geometric invariance in task-space movements and proposing affine methods for recovering from perturbations.
+  mainResults:
+    - Smoothness maximization recovers task trajectories after perturbations.
+    - Combines minimum jerk with affine invariance principles.
+    - Proposes a model compatible with robotic and biological movement.
+
+- title: "Neural Variability in Premotor Cortex Provides a Signature of Motor Preparation"
+  authors: "Mark M. Churchland, Byron M. Yu, Stephen I. Ryu, Greg Santhanam, Krishna V. Shenoy"
+  date: 2006
+  DOI: "10.1523/JNEUROSCI.3762-05.2006"
+  abstract: |
+    This study examines how neural variability in the dorsal premotor cortex (PMd) changes during motor preparation. The authors found that across-trial variability of neural responses was initially high but declined after target onset, suggesting that PMd neurons become more consistent as preparation progresses, providing a neural signature of motor preparation.
+  mainResults:
+    - Across-trial variability in PMd decreases during motor preparation.
+    - Reduced variability correlates with faster reaction times.
+    - Findings support the role of PMd in preparing upcoming movements.
+
+- title: "A Computational Neuroanatomy for Motor Control"
+  authors: "Reza Shadmehr, John W. Krakauer"
+  date: 2008
+  DOI: "10.1007/s00221-008-1280-5"
+  abstract: |
+    This review integrates computational models with neuroanatomical data to understand motor control and learning. It discusses how different brain regions contribute to motor adaptation and the formation of internal models, emphasizing the roles of the cerebellum, motor cortex, and basal ganglia.
+  mainResults:
+    - Proposes a framework linking computational models to brain structures.
+    - Highlights the cerebellum's role in error correction and motor learning.
+    - Discusses the motor cortex's involvement in skill acquisition and execution.
+
+- title: "Internal Models for Motor Control and Trajectory Planning"
+  authors: "Daniel M. Wolpert, Mitsuo Kawato"
+  date: 1998
+  DOI: "10.1016/S0959-4388(98)80074-3"
+  abstract: |
+    This paper explores the concept of internal models in the brain, which predict the sensory consequences of motor commands and are essential for coordinated movement. The authors discuss the distinction between forward and inverse models and their roles in motor control and learning.
+  mainResults:
+    - Introduces forward models predicting sensory outcomes of actions.
+    - Describes inverse models computing necessary motor commands.
+    - Highlights the importance of internal models in motor learning and adaptation.
+
+- title: "Neural Encoding of Movement Dynamics and Kinematics in Motor Cortex"
+  authors: "John F. Kalaska, Stephen H. Scott"
+  date: 1997
+  DOI: "10.1016/S0959-4388(97)80007-3"
+  abstract: |
+    This review examines how neurons in the motor cortex encode information about the dynamics (forces) and kinematics (movement trajectories) of voluntary movements. The authors discuss evidence from neurophysiological studies and the implications for understanding motor control.
+  mainResults:
+    - Motor cortex neurons encode both kinematic and dynamic aspects of movement.
+    - Neural activity reflects the direction and amplitude of movement forces.
+    - Findings suggest a complex representation of movement parameters in motor cortex.
+
+- title: "Representations of Motor Skills and Their Generalization"
+  authors: "Jörn Diedrichsen, Konrad Körding"
+  date: 2013
+  DOI: "10.1016/B978-0-12-807386-1.00005-3"
+  abstract: |
+    This chapter discusses how motor skills are represented in the brain and how these representations allow for the generalization of skills to new contexts. The authors review behavioral and neurophysiological studies, proposing that motor learning involves forming internal models that can be adapted to various tasks.
+  mainResults:
+    - Motor learning involves creating adaptable internal models.
+    - Generalization depends on the similarity between training and new tasks.
+    - Neural representations support flexible application of learned skills.
+
+- title: "Directional Tuning of Motor Cortex Neurons in Rhesus Monkeys Performing a Two-Dimensional Reaching Task"
+  authors: "Andrew P. Georgopoulos, James T. Kalaska, Robert Caminiti, John F. Massey"
+  date: 1982
+  DOI: "10.1016/0006-8993(82)90634-X"
+  abstract: |
+    This seminal study investigates how neurons in the motor cortex of rhesus monkeys respond during reaching movements in different directions. The authors found that individual neurons have preferred directions, with firing rates modulated by the direction of movement, leading to the concept of population coding in motor control.
+  mainResults:
+    - Motor cortex neurons exhibit directional tuning during reaching tasks.
+    - Preferred directions vary across neurons, covering the movement spectrum.
+    - Introduces the idea of population vectors representing movement direction.
+
+- title: "Role of Motor Cortex in Coordinating Multijoint Movements: Is It Time for a Reassessment?"
+  authors: "Stephen H. Scott, John F. Kalaska"
+  date: 1997
+  DOI: "10.1152/jn.1997.77.2.826"
+  abstract: |
+    This study examines how the motor cortex coordinates complex, multijoint arm movements. The authors propose that motor cortex activity reflects an intermediate representation between high-level movement goals and low-level muscle activations, facilitating the transformation of movement plans into actions.
+  mainResults:
+    - Motor cortex activity represents an intermediate coordinate system.
+    - Neuronal firing patterns correspond to both movement direction and joint configuration.
+    - Suggests a hierarchical organization in motor control processes.
+
+- title: "Internal Models in the Cerebellum"
+  authors: "Daniel M. Wolpert, Mitsuo Kawato"
+  date: 1998
+  DOI: "10.1016/S0959-4388(98)80044-3"
+  abstract: |
+    This article discusses the role of the cerebellum in forming internal models for motor control. The authors review evidence supporting the idea that the cerebellum contributes to predicting sensory outcomes of movements and adjusting motor commands accordingly.
+  mainResults:
+    - The cerebellum is crucial for predictive motor control.
+    - Internal models in the cerebellum help compensate for sensory delays.
+    - Dysfunction in these models can lead to motor coordination impairments.
+
+- title: "Signal-Dependent Noise Determines Motor Planning"
+  authors: "Christopher M. Harris, Daniel M. Wolpert"
+  date: 1998
+  DOI: "10.1038/36835"
+  abstract: |
+    This study introduces the concept that variability in motor output is proportional to the magnitude of the motor command, known as signal-dependent noise. The authors propose that the motor system plans movements to minimize the detrimental effects of this noise, influencing the speed and accuracy of movements.
+  mainResults:
+    - Motor output variability increases with the magnitude of commands.
+    - Movement planning strategies account for signal-dependent noise.
+    - Provides a framework for understanding speed-accuracy trade-offs in motor control.
+
+- title: "Neuronal Population Coding of Movement Direction"
+  authors: "Apostolos P. Georgopoulos, Andrew B. Schwartz, Ronald E. Kettner"
+  date: 1986
+  DOI: "10.1126/science.3749885"
+  abstract: |
+    This study investigates how populations of neurons in the motor cortex encode the direction of arm movements. The authors found that individual neurons are broadly tuned to movement directions, and precise movement control is achieved through the combined activity of neuronal populations, introducing the concept of population coding in motor control.
+  mainResults:
+    - Individual motor cortex neurons exhibit broad directional tuning.
+    - Population vectors can predict the direction of arm movements.
+    - Introduces the concept of neuronal population coding for movement direction.
+
+- title: "A Comparison of Movement Direction-Related Versus Load Direction-Related Activity in Primate Motor Cortex, Using a Two-Dimensional Reaching Task"
+  authors: "John F. Kalaska, David A. Drever, Marc L. Wise"
+  date: 1989
+  DOI: "10.1523/JNEUROSCI.09-06-02080.1989"
+  abstract: |
+    This study examines how neurons in the motor cortex respond to different directions of movement and applied loads during a two-dimensional reaching task. The findings suggest that motor cortex neurons encode both the direction of movement and the direction of external loads, highlighting the complexity of motor control.
+  mainResults:
+    - Motor cortex neurons are influenced by both movement direction and load direction.
+    - Neuronal activity reflects the integration of kinematic and kinetic information.
+    - Suggests a multifaceted role of motor cortex in movement execution.
+
+- title: "Optimal Feedback Control as a Theory of Motor Coordination"
+  authors: "Emanuel Todorov, Michael I. Jordan"
+  date: 2002
+  DOI: "10.1038/nn963"
+  abstract: |
+    This paper proposes that the central nervous system coordinates movement by employing optimal feedback control strategies. The theory accounts for the flexibility and adaptability of motor behavior, suggesting that motor commands are continuously adjusted based on sensory feedback to achieve desired outcomes efficiently.
+  mainResults:
+    - Introduces optimal feedback control as a framework for motor coordination.
+    - Explains motor flexibility and adaptability through continuous feedback integration.
+    - Provides insights into the neural basis of motor learning and control.
+
+- title: "The Isochrony Principle: A Perceptual Invariant"
+  authors: "P. Viviani, C. Terzuolo"
+  date: 1982
+  DOI: "10.1016/0001-6918(82)90020-6"
+  abstract: |
+    This study explores the Isochrony Principle, which posits that the duration of voluntary movements remains constant regardless of movement amplitude. The authors provide evidence supporting this principle, suggesting that the temporal aspects of movement are invariant and may be fundamental to motor planning.
+  mainResults:
+    - Movement duration is consistent across different amplitudes.
+    - Supports the existence of temporal invariants in motor control.
+    - Highlights the importance of timing in movement planning.
+
+- title: "The Representation of Movement and Muscles in the Motor Cortex: An Arm Movement Model"
+  authors: "Stephen H. Scott"
+  date: 2004
+  DOI: "10.1016/j.neuron.2004.10.025"
+  abstract: |
+    This review discusses how the motor cortex represents movements and muscle activities, proposing that neurons encode intermediate variables that link desired movements to specific muscle activations. The model emphasizes the role of the motor cortex in transforming movement intentions into coordinated muscle actions.
+  mainResults:
+    - Motor cortex encodes intermediate variables between movement goals and muscle activations.
+    - Proposes a model linking neural activity to coordinated motor output.
+    - Provides insights into the neural mechanisms of movement control.
+
+- title: "Muscle and Movement Representations in the Primary Motor Cortex"
+  authors: "Shinji Kakei, Deanna S. Hoffman, Peter L. Strick"
+  date: 1999
+  DOI: "10.1126/science.285.5436.2136"
+  abstract: |
+    This study investigates how the primary motor cortex represents both muscle activity and movement kinematics. The authors found that some neurons encode muscle-specific information, while others represent movement direction, suggesting a dual representation that facilitates flexible motor control.
+  mainResults:
+    - Identifies neurons encoding muscle-specific and movement direction information.
+    - Demonstrates a dual representation in the primary motor cortex.
+    - Suggests mechanisms for flexible and adaptive motor control.
+
+- title: "Functional Neuroanatomy of Human Hand Motor Recovery After Stroke"
+  authors: "Scott T. Grafton, Richard L. Woods, John A. Mazziotta"
+  date: 1998
+  DOI: "10.1002/ana.410430212"
+  abstract: |
+    This study examines the neural mechanisms underlying the recovery of hand motor function after stroke using functional imaging techniques. The findings reveal changes in cortical activation patterns associated with motor recovery, highlighting the brain's plasticity in response to injury.
+  mainResults:
+    - Identifies cortical reorganization during motor recovery post-stroke.
+    - Highlights the role of the contralesional hemisphere in functional recovery.
+    - Provides evidence for neural plasticity in motor rehabilitation.
+
+- title: "Constraints on Somatotopic Organization in the Primary Motor Cortex"
+  authors: "Marc H. Schieber"
+  date: 2001
+  DOI: "10.1016/S0166-2236(00)01831-4"
+  abstract: |
+    This review explores the somatotopic organization of the primary motor cortex, discussing the limitations and variability in the representation of different body parts. The author suggests that overlapping and distributed representations enable complex and coordinated movements.
+  mainResults:
+    - Discusses the flexible somatotopic organization of the motor cortex.
+    - Suggests overlapping representations facilitate complex motor tasks.
+    - Highlights the adaptability of motor cortical maps.
+
+- title: "The Two-Thirds Power Law: A General Model for the Kinematics of Drawing Movements"
+  authors: "Francesco Lacquaniti, Carlo Terzuolo, Paolo Viviani"
+  date: 1983
+  DOI: "10.1016/0001-6918(83)90027-6"
+  abstract: |
+    This study introduces the Two-Thirds Power Law, describing a relationship between the curvature of a movement trajectory and the speed of drawing movements. The authors propose that this law reflects fundamental constraints in the motor control system.
+  mainResults:
+    - Establishes a power-law relationship between movement curvature and speed.
+    - Suggests intrinsic constraints in the motor control system.
+    - Provides a mathematical model for predicting movement kinematics.
+
+- title: "Movement Timing and Invariance Arise from Several Geometries"
+  authors: "Daniel Bennequin, Richard Fuchs, Alain Berthoz, Tamar Flash"
+  date: 2009
+  DOI: "10.1371/journal.pcbi.1000426"
+  abstract: |
+    Human movements exhibit prominent features such as the isochrony principle, where movement duration is nearly independent of movement size, and the 2/3 power law, describing the relationship between movement speed and curvature. This study proposes a new theory of movement generation based on geometrical invariance, suggesting that movement timing and compositionality arise from the cooperation among Euclidean, equi-affine, and full affine geometries. Each geometry provides a canonical measure of distance along curves, leading to invariant arc-length parameters that account for observed movement features.
+  mainResults:
+    - Introduces a theory where movement timing is derived from multiple geometries.
+    - Explains the isochrony principle and 2/3 power law through geometrical invariance.
+    - Suggests that complex movements are composed of simpler geometric elements.
+
+- title: "Minimum-Jerk, Two-Thirds Power Law, and Isochrony: Converging Approaches to Movement Planning"
+  authors: "Paolo Viviani, Tamar Flash"
+  date: 1995
+  DOI: "10.1037/0096-1523.21.1.32"
+  abstract: |
+    This study contrasts two approaches to movement planning by analyzing the drawing of complex two-dimensional trajectories. It examines whether the covariations of kinematic and geometrical parameters, formalized by the two-thirds power law and the isochrony principle, can be derived from the minimum-jerk model hypothesis. The findings indicate a satisfactory convergence regarding the relationship between tangential velocity and curvature (two-thirds power law). However, global isochrony could not be deduced from the optimal control hypothesis, suggesting that velocity scaling within movement subunits aligns with the minimum-jerk hypothesis.
+  mainResults:
+    - The two-thirds power law, relating tangential velocity and curvature, aligns with the minimum-jerk model.
+    - Global isochrony is not derivable from the optimal control hypothesis.
+    - Velocity scaling within movement subunits supports the minimum-jerk hypothesis.

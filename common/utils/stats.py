@@ -1,9 +1,22 @@
 import numpy as np
-from typing import Sequence
+from typing import Sequence, Callable, NamedTuple
 
 
 _stat_full_names = ('size', 'sum', 'mean', 'median', 'var', 'std', 'mad', 'se_mean', 'se_median', 'min', 'max')
 _aliases = {'size': 'n', 'mean': 'avg', 'median': 'med', 'se_mean': 'se', 'se_median': 'sm'}
+
+
+class ZScoreRes(NamedTuple):
+    val: float
+    z: float
+    bl_loc: float
+    bl_scale: float
+    robust: bool
+
+
+def calc_zscore(x, xs, robust: bool = True) -> ZScoreRes:
+    z, bl_loc, bl_scale = zscore(x, xs, robust=robust)
+    return ZScoreRes(val=x, z=z, bl_loc=bl_loc, bl_scale=bl_scale, robust=robust)
 
 
 class BinSpec:
